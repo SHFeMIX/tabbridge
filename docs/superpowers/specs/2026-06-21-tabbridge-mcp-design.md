@@ -6,7 +6,7 @@
 
 TabBridge 是一个本地优先的 MCP server + Chrome 扩展，用来让本地 agent 检查并控制用户已授权、已经打开的 Chrome 标签页。它默认不启动独立浏览器、不创建新浏览器 profile，也不新开标签页；它连接的是用户当前真实浏览器里的页面，因此能复用用户已有登录态、Cookie、页面状态和正在使用的浏览器上下文。
 
-MVP 只支持 macOS + Chrome/Chromium。MCP server、Chrome 扩展、Native Messaging host 和共享协议都使用 TypeScript 实现。
+MVP 只支持 macOS + Chrome/Chromium。MCP server、Native Messaging host 和共享协议使用 TypeScript；Chrome 扩展使用 **WXT + Vue + Vite** 开发。WXT 官方定位是 Next-gen Web Extension Framework，支持 TypeScript、文件式 entrypoints、快速 dev mode，并提供 Vue starter template。
 
 项目名统一为 **TabBridge**：
 
@@ -161,7 +161,9 @@ tabbridge mcp-server  <── local IPC ──>  tabbridge native-host  <──>
 
 职责：
 
-- 提供 MV3 Chrome 扩展。
+- 使用 WXT + Vue + Vite 提供 MV3 Chrome 扩展。
+- 通过 WXT entrypoints 管理 background/service worker、content scripts、popup/options 等入口。
+- 用 Vue 实现站点授权、高风险操作确认、状态诊断等扩展 UI。
 - 通过 `chrome.runtime.connectNative` 连接 native host。
 - 通过 Chrome extension API 枚举 tabs。
 - 按需请求 host permissions。
@@ -287,7 +289,7 @@ type BridgeResponse = {
 
 ## MCP 工具面
 
-工具名采用接近 agent browser 的命名方式，以降低模型使用成本。
+工具名采用接近现有浏览器控制 MCP / agent browser 工具的命名方式，以降低模型使用成本。设计和实现时应优先参考成熟开源项目已经暴露的工具接口；如果 Chrome 扩展能安全实现某些额外实用能力，而现有 agent browser 工具没有暴露，也可以加入，但必须遵守本设计的权限、风险分类和可审计原则。
 
 ### Tab 发现与授权
 
@@ -454,7 +456,7 @@ MVP 不暴露。
 
 ### 参考来源
 
-snapshot/ref 实现应在许可证和运行环境允许时，优先复用或适配开源浏览器控制项目的成熟思路：
+snapshot/ref 实现应在许可证和运行环境允许时，优先复用或适配开源浏览器控制项目的成熟思路和可迁移代码。原则是：能直接参考 agent browser 设计和源码实现的地方就优先参考；但只能移植适合 Chrome 扩展 content script / WXT 运行环境的部分，不引入 Playwright `page`、Locator、ElementHandle、browser context 等运行时依赖。
 
 - Microsoft Playwright MCP，Apache-2.0：<https://github.com/microsoft/playwright-mcp>
 - Browserbase Stagehand，MIT：<https://github.com/browserbase/stagehand>
@@ -701,6 +703,8 @@ MVP 要求：
 
 ### Extension tests
 
+- WXT entrypoints 的 background/content script 消息路由。
+- Vue 授权/确认 UI 的状态渲染与用户操作。
 - content script snapshot extraction。
 - fixture 页面中的 form/input/button interaction。
 - high-risk action classification。
@@ -725,6 +729,9 @@ MVP 要求：
 
 - MCP transports：<https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>
 - MCP transport concepts：<https://modelcontextprotocol.io/docs/concepts/transports>
+- WXT 官网：<https://wxt.dev/>
+- WXT 安装与 starter templates：<https://wxt.dev/guide/installation.html>
+- WXT Browser Startup / dev mode：<https://wxt.dev/guide/essentials/config/browser-startup.html>
 - Chrome Native Messaging：<https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging>
 - Chrome runtime `connectNative`：<https://developer.chrome.com/docs/extensions/reference/api/runtime#method-connectNative>
 - Chrome tabs API：<https://developer.chrome.com/docs/extensions/reference/api/tabs>
