@@ -64,6 +64,32 @@ async function sendRaw(path: string, value: string): Promise<string> {
   })
 }
 
+async function sendChunks(path: string, chunks: Buffer[]): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection(path)
+    let buffer = ''
+    socket.once('error', reject)
+    socket.once('connect', () => {
+      const writeNext = (index: number): void => {
+        const chunk = chunks[index]
+        if (!chunk) return
+        socket.write(chunk)
+        setTimeout(() => writeNext(index + 1), 10)
+      }
+      writeNext(0)
+    })
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8')
+      const newline = buffer.indexOf('\n')
+      if (newline >= 0) {
+        resolve(buffer.slice(0, newline))
+        socket.destroy()
+      }
+    })
+    socket.once('end', () => resolve(buffer))
+  })
+}
+
 async function readLine(socket: net.Socket): Promise<string> {
   return await new Promise((resolve, reject) => {
     let buffer = ''
@@ -161,24 +187,15 @@ describe('IPC server', () => {
 
   it('does not process another request on the same socket while one is pending', async () => {
     const path = await socketPath()
-    let releaseFirst!: () => void
-    const firstRelease = new Promise<void>((resolve) => {
-      releaseFirst = resolve
-    })
-    let firstStarted!: () => void
-    const firstStart = new Promise<void>((resolve) => {
-      firstStarted = resolve
-    })
+    let resolveFirst: ((value: ReturnType<typeof okEnvelope>) => void) | undefined
     const seen: string[] = []
     const server = await startIpcServer({
       socketPath: path,
       onRequest: async (incoming) => {
         seen.push(incoming.id)
-        if (incoming.id === 'req_first') {
-          firstStarted()
-          await firstRelease
-        }
-        return okEnvelope({ id: incoming.id })
+        return await new Promise((resolve) => {
+          resolveFirst = resolve
+        })
       },
     })
     const socket = net.createConnection(path)
@@ -188,16 +205,79 @@ describe('IPC server', () => {
         socket.once('connect', resolve)
         socket.once('error', reject)
       })
-      socket.write(`${JSON.stringify(request('req_first'))}\n`)
-      await firstStart
-      socket.write(`${JSON.stringify(request('req_second'))}\n`)
-      await new Promise((resolve) => setImmediate(resolve))
+      socket.write(`${JSON.stringify(request('req_pending_first'))}\n`)
+      socket.write(`${JSON.stringify(request('req_pending_second'))}\n`)
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      expect(seen).toEqual(['req_pending_first'])
 
-      expect(seen).toEqual(['req_first'])
-      const firstResponse = readLine(socket)
-      releaseFirst()
+      resolveFirst?.(okEnvelope({ done: true }))
+      const response = JSON.parse(await readLine(socket))
+      expect(response).toMatchObject({ id: 'req_pending_first', ok: true })
+      expect(seen).toEqual(['req_pending_first'])
+    } finally {
+      socket.destroy()
+      await closeServer(server)
+    }
+  })
 
-      await expect(firstResponse).resolves.toContain('req_first')
+  it('decodes newline-delimited request bytes after split multibyte UTF-8 characters are complete', async () => {
+    const path = await socketPath()
+    const seen: BridgeRequest[] = []
+    const server = await startIpcServer({
+      socketPath: path,
+      onRequest: async (incoming) => {
+        seen.push(incoming)
+        return okEnvelope({ text: (incoming.payload as { text: string }).text })
+      },
+    })
+    const line = `${JSON.stringify(createBridgeRequest({
+      id: 'req_multibyte',
+      source: 'cli',
+      target: 'extension',
+      command: 'snapshot.text',
+      payload: { text: 'hello 🌉' },
+      createdAt: 1782012345000,
+    }))}\n`
+    const bytes = Buffer.from(line, 'utf8')
+    const splitAt = bytes.indexOf(Buffer.from('🌉', 'utf8')) + 2
+    const firstChunk = bytes.subarray(0, splitAt)
+    const secondChunk = bytes.subarray(splitAt)
+    const firstReplacement = firstChunk.toString('utf8').includes('�')
+    const secondReplacement = secondChunk.toString('utf8').includes('�')
+    expect(firstReplacement || secondReplacement).toBe(true)
+
+    try {
+      const response = JSON.parse(await sendChunks(path, [firstChunk, secondChunk]))
+
+      expect(response).toMatchObject({
+        id: 'req_multibyte',
+        protocolVersion: 1,
+        ok: true,
+        payload: { text: 'hello 🌉' },
+      })
+      expect(seen).toHaveLength(1)
+      expect(seen[0]?.payload).toEqual({ text: 'hello 🌉' })
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  it('handles accepted socket errors without throwing from the server', async () => {
+    const path = await socketPath()
+    const server = await startIpcServer({
+      socketPath: path,
+      onRequest: async () => okEnvelope({ tabs: [] }),
+    })
+    const socket = net.createConnection(path)
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', resolve)
+        socket.once('error', reject)
+      })
+      socket.emit('error', Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }))
+
+      await expect(sendLine(path, JSON.stringify(request('req_after_socket_error')))).resolves.toContain('"ok":true')
     } finally {
       socket.destroy()
       await closeServer(server)

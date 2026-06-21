@@ -1,5 +1,12 @@
 import { CHROME_TO_NATIVE_HOST_MAX_BYTES, NATIVE_HOST_TO_CHROME_MAX_BYTES } from '@tabbridge/shared'
 
+export class NativeMessageDecodingError extends Error {
+  constructor(message: string, readonly messages: unknown[], options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'NativeMessageDecodingError'
+  }
+}
+
 export function encodeNativeMessage(value: unknown): Buffer {
   const body = Buffer.from(JSON.stringify(value), 'utf8')
   if (body.byteLength > NATIVE_HOST_TO_CHROME_MAX_BYTES) {
@@ -25,7 +32,11 @@ export class NativeMessageDecoder {
 
       const frame = this.buffer.subarray(4, 4 + length)
       this.buffer = this.buffer.subarray(4 + length)
-      messages.push(JSON.parse(frame.toString('utf8')))
+      try {
+        messages.push(JSON.parse(frame.toString('utf8')))
+      } catch (error) {
+        throw new NativeMessageDecodingError('MALFORMED_NATIVE_MESSAGE', messages, { cause: error })
+      }
     }
 
     return messages

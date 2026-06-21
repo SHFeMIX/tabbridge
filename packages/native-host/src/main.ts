@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import type { Server } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION, type BridgeHello } from '@tabbridge/shared'
@@ -33,6 +34,16 @@ export function routeNativeMessage(bridge: BridgeController, message: unknown): 
   if (typeof message.id === 'string') bridge.acceptResponse(message)
 }
 
+export function routeNativeMessages(bridge: BridgeController, messages: unknown[], onError: (error: unknown) => void): void {
+  for (const message of messages) {
+    try {
+      routeNativeMessage(bridge, message)
+    } catch (error) {
+      onError(error)
+    }
+  }
+}
+
 function closeIpcServer(server: Server | undefined): void {
   server?.close((error) => {
     if (error) process.stderr.write(`${error.stack ?? error.message}\n`)
@@ -58,9 +69,9 @@ export async function runNativeHost(): Promise<void> {
 
   process.stdin.on('data', (chunk: Buffer) => {
     try {
-      for (const message of decoder.push(chunk)) {
-        routeNativeMessage(bridge, message)
-      }
+      routeNativeMessages(bridge, decoder.push(chunk), (error) => {
+        process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
+      })
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
     }
@@ -78,8 +89,13 @@ export async function runNativeHost(): Promise<void> {
   if (shuttingDown) closeIpcServer(ipcServer)
 }
 
-function isExecutedEntrypoint(): boolean {
-  return process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]
+export function isExecutedEntrypoint(moduleUrl = import.meta.url, argvPath = process.argv[1]): boolean {
+  if (argvPath === undefined) return false
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(argvPath)
+  } catch {
+    return fileURLToPath(moduleUrl) === argvPath
+  }
 }
 
 if (isExecutedEntrypoint()) {

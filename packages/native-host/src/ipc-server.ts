@@ -91,32 +91,39 @@ export async function startIpcServer(options: IpcServerOptions): Promise<net.Ser
   const maxRequestBytes = options.maxRequestBytes ?? DEFAULT_MAX_IPC_REQUEST_BYTES
 
   const server = net.createServer((socket) => {
-    let buffer = ''
+    let buffer = Buffer.alloc(0)
     let bufferedBytes = 0
     let draining = false
     let closed = false
 
+    socket.on('error', () => {
+      closed = true
+    })
+
     const endWithResponse = (response: BridgeResponse): void => {
       if (closed) return
       closed = true
-      socket.write(`${JSON.stringify(response)}\n`)
-      socket.end()
+      try {
+        socket.end(`${JSON.stringify(response)}\n`)
+      } catch {
+        socket.destroy()
+      }
     }
 
     const drain = async (): Promise<void> => {
       if (draining || closed) return
       draining = true
       try {
-        let newline = buffer.indexOf('\n')
+        let newline = buffer.indexOf(0x0a)
         while (newline >= 0) {
-          const line = buffer.slice(0, newline)
-          buffer = buffer.slice(newline + 1)
-          bufferedBytes = Buffer.byteLength(buffer, 'utf8')
-          newline = buffer.indexOf('\n')
+          const lineBytes = buffer.subarray(0, newline)
+          buffer = buffer.subarray(newline + 1)
+          bufferedBytes = buffer.byteLength
+          newline = buffer.indexOf(0x0a)
 
           let parsed: unknown
           try {
-            parsed = JSON.parse(line) as unknown
+            parsed = JSON.parse(lineBytes.toString('utf8')) as unknown
           } catch {
             endWithResponse(protocolError('unknown'))
             return
@@ -145,7 +152,7 @@ export async function startIpcServer(options: IpcServerOptions): Promise<net.Ser
         return
       }
 
-      buffer += chunk.toString('utf8')
+      buffer = Buffer.concat([buffer, chunk])
 
       void drain().catch(() => {
         endWithResponse(protocolError('unknown'))

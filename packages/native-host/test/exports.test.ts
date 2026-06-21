@@ -1,3 +1,7 @@
+import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 describe('native-host package exports', () => {
@@ -73,6 +77,24 @@ describe('native-host executable entrypoint', () => {
           process.stdin.off('data', listener as (...args: unknown[]) => void)
         }
       }
+    }
+  })
+
+  it('detects execution through a package bin symlink', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'tabbridge-native-bin-'))
+
+    try {
+      const { isExecutedEntrypoint } = await import('../src/main.js') as typeof import('../src/main.js') & {
+        isExecutedEntrypoint?: (moduleUrl: string, argvPath: string | undefined) => boolean | Promise<boolean>
+      }
+      expect(isExecutedEntrypoint).toBeTypeOf('function')
+      const realMainPath = fileURLToPath(new URL('../src/main.ts', import.meta.url))
+      const symlinkPath = join(tempDir, 'tabbridge-native-host')
+      await symlink(realMainPath, symlinkPath)
+
+      expect(isExecutedEntrypoint?.(new URL('../src/main.ts', import.meta.url).href, symlinkPath)).toBe(true)
+    } finally {
+      await rm(tempDir, { recursive: true, force: true })
     }
   })
 })

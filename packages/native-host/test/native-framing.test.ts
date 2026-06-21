@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NativeMessageDecoder, encodeNativeMessage } from '../src/native-framing.js'
+import { NativeMessageDecoder, NativeMessageDecodingError, encodeNativeMessage } from '../src/native-framing.js'
 
 describe('Chrome Native Messaging framing', () => {
   it('encodes JSON with little-endian 32-bit length prefix', () => {
@@ -19,14 +19,22 @@ describe('Chrome Native Messaging framing', () => {
     expect(decoder.push(encoded.subarray(3))).toEqual([{ id: 'req_1', ok: true }])
   })
 
-  it('advances past malformed complete JSON frames before reporting the parse error', () => {
+  it('returns valid messages decoded before a malformed JSON frame in the same chunk', () => {
     const decoder = new NativeMessageDecoder()
     const malformedBody = Buffer.from('{not json', 'utf8')
     const malformedHeader = Buffer.alloc(4)
     malformedHeader.writeUInt32LE(malformedBody.byteLength, 0)
-    const valid = encodeNativeMessage({ id: 'req_after_malformed', ok: true })
 
-    expect(() => decoder.push(Buffer.concat([malformedHeader, malformedBody, valid]))).toThrow(SyntaxError)
-    expect(decoder.push(Buffer.alloc(0))).toEqual([{ id: 'req_after_malformed', ok: true }])
+    try {
+      decoder.push(Buffer.concat([
+        encodeNativeMessage({ id: 'req_before_malformed', ok: true }),
+        malformedHeader,
+        malformedBody,
+      ]))
+      throw new Error('expected decoder to report malformed frame')
+    } catch (error) {
+      expect(error).toBeInstanceOf(NativeMessageDecodingError)
+      expect((error as NativeMessageDecodingError).messages).toEqual([{ id: 'req_before_malformed', ok: true }])
+    }
   })
 })

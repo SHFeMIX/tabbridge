@@ -30,6 +30,8 @@ type PendingRequest = {
   timer: NodeJS.Timeout
 }
 
+type InFlightRequest = PendingRequest | 'reserved'
+
 function timeoutError(): TabBridgeError {
   return {
     code: 'BRIDGE_REQUEST_TIMEOUT',
@@ -104,16 +106,18 @@ function validateExtensionResponse(response: unknown, expectedId: string): Bridg
   if (response.protocolVersion !== PROTOCOL_VERSION) return malformedResponseError(expectedId, 'protocolVersion')
   if (typeof response.ok !== 'boolean') return malformedResponseError(expectedId, 'ok')
   if (response.ok) {
+    if (Object.hasOwn(response, 'error')) return malformedResponseError(expectedId, 'error')
     if (!Object.hasOwn(response, 'payload')) return malformedResponseError(expectedId, 'payload')
     return { id: expectedId, protocolVersion: PROTOCOL_VERSION, ok: true, payload: response.payload }
   }
+  if (Object.hasOwn(response, 'payload')) return malformedResponseError(expectedId, 'payload')
   if (!isTabBridgeError(response.error)) return malformedResponseError(expectedId, 'error')
   return { id: expectedId, protocolVersion: PROTOCOL_VERSION, ok: false, error: response.error }
 }
 
 export class BridgeController {
   private extensionHello: BridgeHello | undefined
-  private readonly pending = new Map<string, PendingRequest>()
+  private readonly pending = new Map<string, InFlightRequest>()
   private readonly actionQueue = new TabActionQueue()
 
   constructor(private readonly options: BridgeControllerOptions) {}
@@ -137,6 +141,7 @@ export class BridgeController {
   disconnect(): void {
     this.extensionHello = undefined
     for (const [id, pending] of this.pending) {
+      if (pending === 'reserved') continue
       clearTimeout(pending.timer)
       pending.resolve({ id, protocolVersion: PROTOCOL_VERSION, ok: false, error: bridgeNotConnectedError('extension_asleep') })
     }
@@ -144,14 +149,19 @@ export class BridgeController {
   }
 
   async forward(request: BridgeRequest, sendToExtension: (request: BridgeRequest) => void | Promise<void>): Promise<CliEnvelope<unknown>> {
+    if (this.pending.has(request.id)) return errorEnvelope(duplicateRequestIdError(request.id))
+    this.pending.set(request.id, 'reserved')
     const tabId = actionTabId(request)
-    if (tabId === undefined) return await this.forwardNow(request, sendToExtension)
-    return await this.actionQueue.run(tabId, () => this.forwardNow(request, sendToExtension))
+    try {
+      if (tabId === undefined) return await this.forwardNow(request, sendToExtension)
+      return await this.actionQueue.run(tabId, () => this.forwardNow(request, sendToExtension))
+    } finally {
+      if (this.pending.get(request.id) === 'reserved') this.pending.delete(request.id)
+    }
   }
 
   private async forwardNow(request: BridgeRequest, sendToExtension: (request: BridgeRequest) => void | Promise<void>): Promise<CliEnvelope<unknown>> {
     if (!this.extensionHello) return errorEnvelope(bridgeNotConnectedError('extension_asleep'))
-    if (this.pending.has(request.id)) return errorEnvelope(duplicateRequestIdError(request.id))
 
     const response = await new Promise<BridgeResponse>((resolve) => {
       const timer = setTimeout(() => {
@@ -159,14 +169,21 @@ export class BridgeController {
         resolve({ id: request.id, protocolVersion: PROTOCOL_VERSION, ok: false, error: timeoutError() })
       }, this.options.requestTimeoutMs)
 
-      this.pending.set(request.id, { resolve, timer })
+      const pending: PendingRequest = { resolve, timer }
+      this.pending.set(request.id, pending)
 
-      Promise.resolve(sendToExtension(request)).catch(() => {
-        if (this.pending.get(request.id)?.timer !== timer) return
+      const failSend = (): void => {
+        if (this.pending.get(request.id) !== pending) return
         clearTimeout(timer)
         this.pending.delete(request.id)
         resolve({ id: request.id, protocolVersion: PROTOCOL_VERSION, ok: false, error: bridgeNotConnectedError('extension_asleep') })
-      })
+      }
+
+      try {
+        Promise.resolve(sendToExtension(request)).catch(failSend)
+      } catch {
+        failSend()
+      }
     })
 
     if (response.protocolVersion !== PROTOCOL_VERSION) {
@@ -185,7 +202,7 @@ export class BridgeController {
   acceptResponse(response: unknown): boolean {
     if (!isRecord(response) || typeof response.id !== 'string') return false
     const pending = this.pending.get(response.id)
-    if (!pending) return false
+    if (!pending || pending === 'reserved') return false
 
     clearTimeout(pending.timer)
     this.pending.delete(response.id)
