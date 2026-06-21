@@ -42,3 +42,16 @@
 ## Concerns
 - Task 2 local `native-host` CLI handler is intentionally not wired to this server yet; this task only creates the package/library behavior and executable entry point.
 - Token file creation is implemented for runtime security, but the current CLI IPC contract does not transmit the token; enforcing token authentication should be a future coordinated CLI/native-host protocol change.
+
+## Controller note after hardening fix
+- Cherry-picked implementation fix as `b1d60d5` from fixer subagent commit `8e884c7`.
+- Fixer reported red verification for bridge/IPC hardening cases and green native-host/root test+typecheck.
+
+## Controller note after shared error-code fix
+- Root cause: native-host production code and tests used non-MVP/shared declaration error codes `DUPLICATE_BRIDGE_REQUEST_ID` and `IPC_REQUEST_TOO_LARGE`, while the active shared `TabBridgeErrorCode` type exposed to dependent packages only includes the spec MVP codes.
+- Red verification: after updating native-host regression expectations, `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host test` failed with duplicate request IDs still returning `DUPLICATE_BRIDGE_REQUEST_ID` and oversized IPC frames still returning `IPC_REQUEST_TOO_LARGE`.
+- Fix: mapped duplicate in-flight bridge request IDs to `PROTOCOL_VERSION_MISMATCH` and oversized IPC request frames to `MESSAGE_TOO_LARGE`, preserving the existing recoverability and messages.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host test` passed: 5 files, 17 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host typecheck` passed.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" test` passed: 16 files, 61 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.

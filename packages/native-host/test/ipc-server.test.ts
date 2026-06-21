@@ -137,7 +137,7 @@ describe('IPC server', () => {
         id: 'unknown',
         protocolVersion: 1,
         ok: false,
-        error: { code: 'IPC_REQUEST_TOO_LARGE', recoverable: false },
+        error: { code: 'MESSAGE_TOO_LARGE', recoverable: false },
       })
     } finally {
       await closeServer(server)

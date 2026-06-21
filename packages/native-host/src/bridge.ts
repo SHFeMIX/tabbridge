@@ -65,7 +65,7 @@ function validateExtensionHello(value: unknown): BridgeHello {
 
 function duplicateRequestIdError(id: string): TabBridgeError {
   return {
-    code: 'DUPLICATE_BRIDGE_REQUEST_ID',
+    code: 'PROTOCOL_VERSION_MISMATCH',
     message: `A bridge request with id ${id} is already in flight.`,
     recoverable: false,
   }

@@ -196,7 +196,7 @@ describe('BridgeController request forwarding', () => {
 
     await expect(secondResult).resolves.toMatchObject({
       ok: false,
-      error: { code: 'DUPLICATE_BRIDGE_REQUEST_ID', recoverable: false },
+      error: { code: 'PROTOCOL_VERSION_MISMATCH', recoverable: false },
     })
     expect(sent).toEqual(['req_duplicate'])
     expect(bridge.acceptResponse({ id: 'req_duplicate', protocolVersion: 1, ok: true, payload: { tabs: [] } })).toBe(true)

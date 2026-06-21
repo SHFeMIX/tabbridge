@@ -63,7 +63,7 @@ function requestTooLargeError(): BridgeResponse {
     protocolVersion: PROTOCOL_VERSION,
     ok: false,
     error: {
-      code: 'IPC_REQUEST_TOO_LARGE',
+      code: 'MESSAGE_TOO_LARGE',
       message: 'IPC request exceeded the native host maximum request line size.',
       recoverable: false,
     },
