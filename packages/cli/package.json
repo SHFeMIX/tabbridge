@@ -1,0 +1,25 @@
+{
+  "name": "@tabbridge/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "tabbridge": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsup src/main.ts --format esm --dts --clean --banner.js '#!/usr/bin/env node'",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tabbridge/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
