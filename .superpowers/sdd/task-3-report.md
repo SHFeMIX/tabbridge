@@ -97,3 +97,27 @@
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a" test` passed: 17 files, 70 tests.
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a" typecheck` passed.
 - Concerns: no new protocol error code was introduced; malformed routed responses continue to resolve as the existing structured `PROTOCOL_VERSION_MISMATCH` protocol error.
+
+## Final-review native-host edge-case hardening fix
+- Red verification: after installing dependencies and building `@tabbridge/shared`, `pnpm -C "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes" --filter @tabbridge/native-host test` failed with the new regressions: `NativeMessageDecodingError` missing for preserving messages decoded before malformed JSON, `isExecutedEntrypoint` missing for package-bin symlink execution, synchronous `sendToExtension` throws escaping `BridgeController.forward`, duplicate same-tab action request ids waiting until timeout instead of being rejected before queueing, mutually-exclusive extension response payload/error fields being accepted, and per-message native routing not isolating malformed messages.
+- Red verification: focused IPC regression coverage failed once socket chunk boundaries were forced; split UTF-8 request bytes decoded as replacement characters (`hello ���`) instead of preserving the original payload (`hello 🌉`).
+- Fix: `NativeMessageDecoder` now advances past complete frames and throws `NativeMessageDecodingError` carrying any valid messages decoded before a malformed JSON frame.
+- Fix: `BridgeController` now reserves request ids before action queueing, cleans pending state on synchronous/asynchronous send failures, ignores responses for reserved-only ids, and rejects extension responses that mix success payloads with errors or failure errors with payloads.
+- Fix: native stdin routing now uses `routeNativeMessages()` to catch routing errors per decoded message so one malformed routed message does not abort later messages from the same chunk.
+- Fix: IPC sockets now buffer raw bytes and decode only complete newline-delimited request frames, attach accepted-socket error handling, and use a guarded `socket.end()` response path.
+- Fix: entrypoint detection now compares real paths derived from `fileURLToPath()`/`realpathSync()` so execution through a package-bin symlink still starts the native host.
+- Green verification: `pnpm -C "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes" --filter @tabbridge/native-host test` passed: 6 files, 33 tests.
+- Green verification: `pnpm -C "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes" --filter @tabbridge/native-host typecheck` passed.
+- Green verification: `pnpm -C "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes" test` passed: 17 files, 77 tests.
+- Green verification: `pnpm -C "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes" typecheck` passed.
+- Commit: `4e1d971` (`fix: harden native host edge cases`).
+- Concerns: no new public shared `ERROR_CODES` were added; duplicate request ids and malformed extension responses continue to use the existing structured `PROTOCOL_VERSION_MISMATCH` code, and IPC oversize requests continue to use `MESSAGE_TOO_LARGE`.
+
+## Final-review malformed native frame chunk routing fix
+- Red verification: `pnpm -C /Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes --filter @tabbridge/native-host test -- test/exports.test.ts` failed with the new regression: a valid response decoded before a malformed native frame stayed pending instead of resolving the CLI request.
+- Fix: `runNativeHost()` now recognizes `NativeMessageDecodingError`, routes the decoded `error.messages` through the existing per-message router, and still logs the malformed frame error.
+- Green verification: `pnpm -C /Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes --filter @tabbridge/native-host test` passed: 6 files, 34 tests.
+- Green verification: `pnpm -C /Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes --filter @tabbridge/native-host typecheck` passed.
+- Green verification: `pnpm -C /Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes test` passed: 17 files, 78 tests.
+- Green verification: `pnpm -C /Users/alan/Desktop/agent-browser-extension/.claude/worktrees/task3-native-host-fixes typecheck` passed.
+- Concerns: none.

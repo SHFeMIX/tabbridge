@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION, type BridgeHello } from '@tabbridge/shared'
 import { BridgeController } from './bridge.js'
 import { startIpcServer } from './ipc-server.js'
-import { encodeNativeMessage, NativeMessageDecoder } from './native-framing.js'
+import { encodeNativeMessage, NativeMessageDecoder, NativeMessageDecodingError } from './native-framing.js'
 import { createRuntimePaths, ensureRuntimeSecurity } from './runtime-paths.js'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,6 +73,11 @@ export async function runNativeHost(): Promise<void> {
         process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
       })
     } catch (error) {
+      if (error instanceof NativeMessageDecodingError) {
+        routeNativeMessages(bridge, error.messages, (routingError) => {
+          process.stderr.write(`${routingError instanceof Error ? routingError.stack : String(routingError)}\n`)
+        })
+      }
       process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
     }
   })

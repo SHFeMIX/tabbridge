@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { createBridgeRequest, PROTOCOL_VERSION } from '@tabbridge/shared'
+import { encodeNativeMessage } from '../src/native-framing.js'
 
 describe('native-host package exports', () => {
   it('points package library entrypoints at dist/index and keeps the executable on dist/main', async () => {
@@ -76,6 +78,80 @@ describe('native-host executable entrypoint', () => {
         if (!originalDataListeners.includes(listener)) {
           process.stdin.off('data', listener as (...args: unknown[]) => void)
         }
+      }
+    }
+  })
+
+  it('routes valid decoded stdin messages before logging a malformed native frame', async () => {
+    const { startIpcServer } = await import('../src/ipc-server.js')
+    const close = vi.fn((callback?: (error?: Error) => void) => {
+      callback?.()
+      return undefined
+    })
+    let onRequest: Parameters<typeof startIpcServer>[0]['onRequest'] | undefined
+    vi.mocked(startIpcServer).mockImplementationOnce(async (options) => {
+      onRequest = options.onRequest
+      return { close } as never
+    })
+    const originalDataListeners = process.stdin.listeners('data')
+    const originalEndListeners = process.stdin.listeners('end')
+    const originalCloseListeners = process.stdin.listeners('close')
+    const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const malformedBody = Buffer.from('{not json', 'utf8')
+    const malformedHeader = Buffer.alloc(4)
+    malformedHeader.writeUInt32LE(malformedBody.byteLength, 0)
+
+    try {
+      const { runNativeHost } = await import('../src/main.js')
+      await runNativeHost()
+      expect(onRequest).toBeTypeOf('function')
+      process.stdin.emit('data', encodeNativeMessage({
+        type: 'hello',
+        protocolVersion: PROTOCOL_VERSION,
+        role: 'extension',
+        version: '0.1.0',
+        capabilities: { commands: [], snapshot: [], permissions: [] },
+      }))
+      const forwarded = onRequest?.(createBridgeRequest({
+        id: 'req_before_malformed_frame',
+        source: 'cli',
+        target: 'extension',
+        command: 'tabs.list',
+        payload: {},
+        createdAt: 1782012345000,
+      }))
+
+      process.stdin.emit('data', Buffer.concat([
+        encodeNativeMessage({
+          id: 'req_before_malformed_frame',
+          protocolVersion: PROTOCOL_VERSION,
+          ok: true,
+          payload: { tabs: [{ id: 1 }] },
+        }),
+        malformedHeader,
+        malformedBody,
+      ]))
+
+      const result = await Promise.race([
+        forwarded,
+        new Promise((resolve) => setImmediate(() => resolve('still pending'))),
+      ])
+
+      expect(result).toEqual({ ok: true, data: { tabs: [{ id: 1 }] } })
+      expect(stderrWrite).toHaveBeenCalled()
+    } finally {
+      process.stdin.emit('end')
+      stdoutWrite.mockRestore()
+      stderrWrite.mockRestore()
+      for (const listener of process.stdin.listeners('data')) {
+        if (!originalDataListeners.includes(listener)) process.stdin.off('data', listener as (...args: unknown[]) => void)
+      }
+      for (const listener of process.stdin.listeners('end')) {
+        if (!originalEndListeners.includes(listener)) process.stdin.off('end', listener as (...args: unknown[]) => void)
+      }
+      for (const listener of process.stdin.listeners('close')) {
+        if (!originalCloseListeners.includes(listener)) process.stdin.off('close', listener as (...args: unknown[]) => void)
       }
     }
   })
