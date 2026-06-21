@@ -33,4 +33,12 @@ describe('CLI parser', () => {
   it('rejects navigate because it is outside the MVP command set', () => {
     expect(() => parseCli(['navigate', '--tab', '123', '--url', 'https://example.com', '--json'])).toThrow('navigate is not part of the TabBridge MVP command set')
   })
+
+  it('rejects a value flag when its value is missing', () => {
+    expect(() => parseCli(['tabs', 'request-access', '--tab', '123', '--reason', '--json'])).toThrow('--reason requires a value')
+  })
+
+  it('rejects a value flag when the next token is another flag', () => {
+    expect(() => parseCli(['type', '--tab', '123', '--snapshot-id', 'snap_1', '--ref', '@e1', '--text', '--json'])).toThrow('--text requires a value')
+  })
 })

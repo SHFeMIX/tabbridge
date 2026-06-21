@@ -29,4 +29,23 @@ describe('CLI command mapping', () => {
 
     expect(request.payload).toEqual({ approvalId: 'appr_123', timeoutMs: 30000 })
   })
+
+  it('routes local runtime commands without creating bridge requests', () => {
+    const localCommands = [
+      { command: 'nativeHost', payload: {} },
+      { command: 'status', payload: {} },
+      { command: 'doctor', payload: {} },
+      { command: 'installNativeHost', payload: { browser: 'chrome', extensionId: 'ext_123' } },
+      { command: 'uninstallNativeHost', payload: { browser: 'chrome' } },
+    ]
+
+    for (const { command, payload } of localCommands) {
+      expect(mapCliToBridgeRequest({ command, json: true, payload }, 1782012345000, `req_${command}`)).toEqual({
+        kind: 'local',
+        command,
+        json: true,
+        payload,
+      })
+    }
+  })
 })

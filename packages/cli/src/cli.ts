@@ -6,7 +6,12 @@ export type ParsedCli = {
 
 function readFlag(argv: string[], flag: string): string | undefined {
   const index = argv.indexOf(flag)
-  return index >= 0 ? argv[index + 1] : undefined
+  if (index < 0) return undefined
+
+  const value = argv[index + 1]
+  if (value === undefined || value.startsWith('--')) throw new Error(`${flag} requires a value`)
+
+  return value
 }
 
 function hasFlag(argv: string[], flag: string): boolean {
