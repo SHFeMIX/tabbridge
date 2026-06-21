@@ -126,6 +126,91 @@ describe('IPC client', () => {
     }
   })
 
+  it('returns promptly when the socket closes before sending any response bytes', async () => {
+    const server = await listenOnce((socket) => {
+      socket.end()
+    })
+    const startedAt = Date.now()
+
+    try {
+      const envelope = await sendBridgeRequest(testRequest(), { socketPath: server.socketPath, timeoutMs: 1000 })
+
+      expect(Date.now() - startedAt).toBeLessThan(250)
+      expect(envelope).toMatchObject({
+        ok: false,
+        error: {
+          code: 'BRIDGE_SOCKET_UNAVAILABLE',
+          recoverable: true,
+        },
+      })
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('rejects bridge responses with a mismatched request id', async () => {
+    const server = await listenOnce((socket) => {
+      socket.write('{"id":"req_other","protocolVersion":1,"ok":true,"payload":{"tabId":1}}\n')
+    })
+
+    try {
+      const envelope = await sendBridgeRequest(testRequest(), { socketPath: server.socketPath, timeoutMs: 1000 })
+
+      expect(envelope).toMatchObject({
+        ok: false,
+        error: {
+          code: 'PROTOCOL_VERSION_MISMATCH',
+          recoverable: true,
+        },
+      })
+      if (!envelope.ok) expect(envelope.error.message).toContain('response id')
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('rejects bridge responses with a mismatched protocol version', async () => {
+    const server = await listenOnce((socket) => {
+      socket.write('{"id":"req_test","protocolVersion":2,"ok":true,"payload":{"tabId":1}}\n')
+    })
+
+    try {
+      const envelope = await sendBridgeRequest(testRequest(), { socketPath: server.socketPath, timeoutMs: 1000 })
+
+      expect(envelope).toMatchObject({
+        ok: false,
+        error: {
+          code: 'PROTOCOL_VERSION_MISMATCH',
+          recoverable: true,
+        },
+      })
+      if (!envelope.ok) expect(envelope.error.message).toContain('protocolVersion')
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('returns a structured recoverable envelope for malformed bridge error responses', async () => {
+    const server = await listenOnce((socket) => {
+      socket.write('{"id":"req_test","protocolVersion":1,"ok":false,"error":{"code":"TAB_NOT_FOUND","message":42,"recoverable":"yes"}}\n')
+    })
+
+    try {
+      const envelope = await sendBridgeRequest(testRequest(), { socketPath: server.socketPath, timeoutMs: 1000 })
+
+      expect(envelope).toMatchObject({
+        ok: false,
+        error: {
+          code: 'PROTOCOL_VERSION_MISMATCH',
+          recoverable: true,
+        },
+      })
+      if (!envelope.ok) expect(typeof envelope.error.message).toBe('string')
+    } finally {
+      await server.close()
+    }
+  })
+
   it('rejects response lines larger than the bounded maximum', async () => {
     const server = await listenOnce((socket) => {
       socket.write('x'.repeat(MAX_RESPONSE_LINE_BYTES + 1))

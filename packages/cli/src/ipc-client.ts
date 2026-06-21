@@ -1,5 +1,5 @@
 import net from 'node:net'
-import { bridgeNotConnectedError, errorEnvelope, okEnvelope, type BridgeRequest, type BridgeResponse, type CliEnvelope } from '@tabbridge/shared'
+import { PROTOCOL_VERSION, bridgeNotConnectedError, errorEnvelope, okEnvelope, type BridgeRequest, type BridgeResponse, type CliEnvelope, type TabBridgeError } from '@tabbridge/shared'
 
 export const MAX_RESPONSE_LINE_BYTES = 1024 * 1024
 
@@ -35,7 +35,15 @@ function closedBeforeResponseError(): CliEnvelope<never> {
   })
 }
 
-function parseBridgeResponse<TData>(line: string): CliEnvelope<TData> {
+function hasValidBridgeError(error: unknown): error is TabBridgeError {
+  if (typeof error !== 'object' || error === null) return false
+  const candidate = error as Partial<TabBridgeError>
+  return typeof candidate.code === 'string'
+    && typeof candidate.message === 'string'
+    && typeof candidate.recoverable === 'boolean'
+}
+
+function parseBridgeResponse<TData>(request: BridgeRequest, line: string): CliEnvelope<TData> {
   let parsed: BridgeResponse
 
   try {
@@ -44,8 +52,19 @@ function parseBridgeResponse<TData>(line: string): CliEnvelope<TData> {
     return protocolError('Native host returned malformed JSON.')
   }
 
+  if (parsed.id !== request.id) {
+    return protocolError(`Native host response id ${String(parsed.id)} did not match request id ${request.id}.`)
+  }
+
+  if (parsed.protocolVersion !== PROTOCOL_VERSION) {
+    return protocolError(`Native host response protocolVersion ${String(parsed.protocolVersion)} did not match CLI protocolVersion ${PROTOCOL_VERSION}.`)
+  }
+
   if (parsed.ok === true) return okEnvelope(parsed.payload as TData)
-  if (parsed.ok === false) return errorEnvelope(parsed.error)
+  if (parsed.ok === false) {
+    if (!hasValidBridgeError(parsed.error)) return protocolError('Native host returned an invalid error response envelope.')
+    return errorEnvelope(parsed.error)
+  }
   return protocolError('Native host returned an invalid response envelope.')
 }
 
@@ -81,7 +100,7 @@ export async function sendBridgeRequest<TData>(request: BridgeRequest, options: 
     })
 
     socket.once('close', () => {
-      if (!settled && buffer.length > 0) finish(closedBeforeResponseError())
+      if (!settled) finish(closedBeforeResponseError())
     })
 
     socket.on('data', (chunk) => {
@@ -94,7 +113,7 @@ export async function sendBridgeRequest<TData>(request: BridgeRequest, options: 
       const newline = buffer.indexOf('\n')
       if (newline >= 0) {
         const line = buffer.slice(0, newline)
-        finish(parseBridgeResponse<TData>(line))
+        finish(parseBridgeResponse<TData>(request, line))
       }
     })
   })
