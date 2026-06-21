@@ -27,9 +27,6 @@ describe('TabBridge errors', () => {
       'USER_DENIED',
       'MESSAGE_TOO_LARGE',
       'PROTOCOL_VERSION_MISMATCH',
-      'IPC_SOCKET_ACTIVE',
-      'IPC_REQUEST_TOO_LARGE',
-      'DUPLICATE_BRIDGE_REQUEST_ID',
       'BROWSER_COMMAND_TIMEOUT',
       'EXTENSION_ID_MISMATCH',
     ])

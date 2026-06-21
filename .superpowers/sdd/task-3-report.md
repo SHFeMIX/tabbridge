@@ -55,3 +55,21 @@
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host typecheck` passed.
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" test` passed: 16 files, 61 tests.
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.
+
+## Controller note after final library export review fix
+- Red verification: added native-host package export/import-side-effect coverage in `packages/native-host/test/exports.test.ts`; `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host test` failed while package metadata still pointed at `dist/main.js`, `src/index.ts` did not exist, and importing `src/main.ts` started the host.
+- Red verification: adjusted shared exact `ERROR_CODES` coverage in `packages/shared/test/errors.test.ts`; `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/shared test` failed while public shared codes still included non-MVP `IPC_SOCKET_ACTIVE`, `IPC_REQUEST_TOO_LARGE`, and `DUPLICATE_BRIDGE_REQUEST_ID`.
+- Fix: added side-effect-free `packages/native-host/src/index.ts` exporting `encodeNativeMessage`, `NativeMessageDecoder`, `createRuntimePaths`, `BridgeController`, `TabActionQueue`, and `startIpcServer`, plus related public types.
+- Fix: moved the native-host package root `main`/`types`/`.` export to `dist/index.*`, retained the executable as `bin.tabbridge-native-host` on `dist/main.js`, and exposed `./main` as the explicit executable subpath.
+- Fix: guarded `runNativeHost()` so importing `packages/native-host/src/main.ts` no longer starts stdin/stdout bridging or the IPC server unless the file is executed as the process entrypoint.
+- Fix: removed the unused non-MVP IPC/duplicate request codes from public shared `ERROR_CODES`; native-host production mappings continue to use existing MVP codes (`MESSAGE_TOO_LARGE` and `PROTOCOL_VERSION_MISMATCH`) for public protocol errors.
+- Build fix: replaced the unsupported `tsup --banner.js` build option with a post-build shebang/chmod step for `dist/main.js` while still emitting both `dist/index.js` and `dist/main.js`.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host test` passed: 6 files, 20 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host typecheck` passed.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host build` passed and emitted `dist/index.js`, `dist/main.js`, `dist/index.d.ts`, and `dist/main.d.ts`.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/shared test` passed: 6 files, 21 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/shared typecheck` passed.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" test` passed: 17 files, 64 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.
+- Commit: pending at report-write time; see git history for `fix: expose native host library APIs`.
+- Concerns: `removeStaleSocket()` still throws internal `Error('IPC_SOCKET_ACTIVE')` for an actually active socket, but this is intentionally not part of the public shared `ERROR_CODES` protocol surface.

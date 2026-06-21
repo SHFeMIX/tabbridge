@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION, type BridgeHello, type BridgeResponse } from '@tabbridge/shared'
 import { BridgeController } from './bridge.js'
 import { startIpcServer } from './ipc-server.js'
@@ -57,7 +58,13 @@ export async function runNativeHost(): Promise<void> {
   })
 }
 
-runNativeHost().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
-  process.exitCode = 1
-})
+function isExecutedEntrypoint(): boolean {
+  return process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]
+}
+
+if (isExecutedEntrypoint()) {
+  runNativeHost().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
+    process.exitCode = 1
+  })
+}
