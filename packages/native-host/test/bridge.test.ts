@@ -1,0 +1,129 @@
+import { describe, expect, it } from 'vitest'
+import { BridgeController } from '../src/bridge.js'
+
+describe('BridgeController', () => {
+  it('starts disconnected and reports extension asleep', () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    expect(bridge.status()).toEqual({ connected: false, state: 'extension_asleep' })
+  })
+
+  it('accepts compatible extension hello', () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    bridge.acceptHello({
+      type: 'hello',
+      protocolVersion: 1,
+      role: 'extension',
+      version: '0.1.0',
+      extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+      capabilities: {
+        commands: ['tabs.list', 'snapshot'],
+        snapshot: ['semantic', 'text', 'html', 'screenshot'],
+        permissions: ['tabs', 'host-permission', 'nativeMessaging', 'scripting', 'storage'],
+      },
+    })
+
+    expect(bridge.status()).toMatchObject({ connected: true, state: 'connected', extensionId: 'abcdefghijklmnopabcdefghijklmnop' })
+  })
+
+  it('rejects protocol version mismatch', () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    expect(() => bridge.acceptHello({
+      type: 'hello',
+      protocolVersion: 2 as 1,
+      role: 'extension',
+      version: '0.1.0',
+      capabilities: { commands: [], snapshot: [], permissions: [] },
+    })).toThrow('PROTOCOL_VERSION_MISMATCH')
+  })
+})
+
+import { createBridgeRequest } from '@tabbridge/shared'
+
+describe('BridgeController request forwarding', () => {
+  it('returns a structured error when forwarding while the extension is asleep', async () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    const request = createBridgeRequest({
+      id: 'req_asleep',
+      source: 'cli',
+      target: 'extension',
+      command: 'tabs.list',
+      payload: {},
+      createdAt: 1782012345000,
+    })
+
+    await expect(bridge.forward(request, () => undefined)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'EXTENSION_NOT_CONNECTED', recoverable: true },
+    })
+  })
+
+  it('correlates extension responses by request id', async () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    bridge.acceptHello({
+      type: 'hello',
+      protocolVersion: 1,
+      role: 'extension',
+      version: '0.1.0',
+      capabilities: { commands: [], snapshot: [], permissions: [] },
+    })
+    const request = createBridgeRequest({
+      id: 'req_forward',
+      source: 'cli',
+      target: 'extension',
+      command: 'tabs.list',
+      payload: {},
+      createdAt: 1782012345000,
+    })
+    const sent: string[] = []
+
+    const result = bridge.forward(request, (outgoing) => {
+      sent.push(outgoing.id)
+    })
+    expect(sent).toEqual(['req_forward'])
+    expect(bridge.acceptResponse({ id: 'req_forward', protocolVersion: 1, ok: true, payload: { tabs: [] } })).toBe(true)
+
+    await expect(result).resolves.toEqual({ ok: true, data: { tabs: [] } })
+  })
+
+  it('serializes action forwarding per tab', async () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    bridge.acceptHello({
+      type: 'hello',
+      protocolVersion: 1,
+      role: 'extension',
+      version: '0.1.0',
+      capabilities: { commands: [], snapshot: [], permissions: [] },
+    })
+    const first = createBridgeRequest({
+      id: 'req_first',
+      source: 'cli',
+      target: 'extension',
+      command: 'action.click',
+      payload: { tabId: 7 },
+      createdAt: 1782012345000,
+    })
+    const second = createBridgeRequest({
+      id: 'req_second',
+      source: 'cli',
+      target: 'extension',
+      command: 'action.type',
+      payload: { tabId: 7 },
+      createdAt: 1782012345001,
+    })
+    const sent: string[] = []
+
+    const firstResult = bridge.forward(first, (request) => {
+      sent.push(request.id)
+    })
+    const secondResult = bridge.forward(second, (request) => {
+      sent.push(request.id)
+    })
+
+    expect(sent).toEqual(['req_first'])
+    bridge.acceptResponse({ id: 'req_first', protocolVersion: 1, ok: true, payload: { done: 'first' } })
+    await expect(firstResult).resolves.toEqual({ ok: true, data: { done: 'first' } })
+    expect(sent).toEqual(['req_first', 'req_second'])
+    bridge.acceptResponse({ id: 'req_second', protocolVersion: 1, ok: true, payload: { done: 'second' } })
+    await expect(secondResult).resolves.toEqual({ ok: true, data: { done: 'second' } })
+  })
+})
