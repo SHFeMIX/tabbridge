@@ -10,7 +10,7 @@ import { removeNativeManifest as defaultRemoveNativeManifest, writeNativeManifes
 const DEFAULT_SOCKET_PATH = `${process.env.HOME ?? ''}/Library/Application Support/tabbridge/bridge.sock`
 
 type SendBridgeRequest = (request: BridgeRequest, options: { socketPath: string; timeoutMs: number }) => Promise<CliEnvelope<unknown>>
-type WriteNativeManifest = (input: { browser: BrowserChannel; extensionId: string; wrapperPath: string }) => Promise<NativeManifestInstallResult>
+type WriteNativeManifest = (input: { browser: BrowserChannel; extensionId: string }) => Promise<NativeManifestInstallResult>
 type RemoveNativeManifest = (input: { browser: BrowserChannel }) => Promise<NativeManifestUninstallResult>
 type RunDoctor = (input: { browser: BrowserChannel; extensionId?: string }) => Promise<DoctorReport>
 
@@ -61,7 +61,7 @@ async function handleLocalCommand(command: LocalCliCommand, handlers: { writeNat
     const browser = browserFromPayload(command.payload)
     const extensionId = optionalExtensionId(command.payload)
     if (!extensionId) throw new Error('install-native-host requires --extension-id')
-    return okEnvelope(await handlers.writeNativeManifest({ browser, extensionId, wrapperPath: process.execPath }))
+    return okEnvelope(await handlers.writeNativeManifest({ browser, extensionId }))
   }
 
   if (command.command === 'uninstallNativeHost') {

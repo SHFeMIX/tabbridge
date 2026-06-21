@@ -13,6 +13,7 @@ export type DoctorInputs = {
   manifestExists: boolean
   manifestValid: boolean
   manifestPathExecutable: boolean
+  extensionIdExpected: boolean
   extensionIdMatches: boolean
   socketExists: boolean
   bridgeConnected: boolean
@@ -68,11 +69,22 @@ async function executable(filePath: string | undefined): Promise<boolean> {
   }
 }
 
+function expectedExtensionIdCheck(expected: boolean): DoctorCheck {
+  return expected
+    ? { name: 'expected extension id was provided', ok: true }
+    : {
+      name: 'expected extension id was provided',
+      ok: false,
+      detail: 'Pass --extension-id to validate native manifest allowed_origins.',
+    }
+}
+
 export function evaluateDoctorReport(input: DoctorInputs): DoctorReport {
   const checks: DoctorCheck[] = [
     { name: 'native host manifest exists', ok: input.manifestExists },
     { name: 'native host manifest JSON is valid', ok: input.manifestValid },
     { name: 'native host wrapper path is executable', ok: input.manifestPathExecutable },
+    expectedExtensionIdCheck(input.extensionIdExpected),
     { name: 'extension id matches allowed_origins', ok: input.extensionIdMatches },
     { name: 'Unix socket path is present', ok: input.socketExists },
     { name: 'native host and extension are connected', ok: input.bridgeConnected },
@@ -85,7 +97,7 @@ export function evaluateDoctorReport(input: DoctorInputs): DoctorReport {
   }
 
   const bridgeState = input.bridgeConnected ? 'connected' : 'extension_asleep'
-  if (!input.extensionIdMatches) {
+  if (!input.extensionIdExpected || !input.extensionIdMatches) {
     return { ok: false, bridgeState, errorCode: 'EXTENSION_ID_MISMATCH', checks }
   }
 
@@ -120,13 +132,15 @@ export async function runDoctor(input: DoctorRunInput): Promise<DoctorReport> {
   }
 
   const expectedOrigin = input.extensionId ? `chrome-extension://${input.extensionId}/` : undefined
-  const extensionIdMatches = expectedOrigin === undefined ? manifestValid : manifest?.allowed_origins.length === 1 && manifest.allowed_origins[0] === expectedOrigin
+  const extensionIdExpected = expectedOrigin !== undefined
+  const extensionIdMatches = expectedOrigin !== undefined && manifest?.allowed_origins.length === 1 && manifest.allowed_origins[0] === expectedOrigin
   const runtimePaths = createRuntimePaths(input.home)
 
   return evaluateDoctorReport({
     manifestExists,
     manifestValid,
     manifestPathExecutable: await executable(manifest?.path),
+    extensionIdExpected,
     extensionIdMatches,
     socketExists: await exists(runtimePaths.socketPath),
     bridgeConnected: false,

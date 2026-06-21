@@ -30,6 +30,22 @@ describe('CLI parser', () => {
     })
   })
 
+  it('parses status native host diagnostic target flags', () => {
+    expect(parseCli(['status', '--browser', 'chromium', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'])).toEqual({
+      command: 'status',
+      json: true,
+      payload: { browser: 'chromium', extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
+    })
+  })
+
+  it('parses doctor native host diagnostic target flags', () => {
+    expect(parseCli(['doctor', '--browser', 'chrome', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'])).toEqual({
+      command: 'doctor',
+      json: true,
+      payload: { browser: 'chrome', extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
+    })
+  })
+
   it('rejects navigate because it is outside the MVP command set', () => {
     expect(() => parseCli(['navigate', '--tab', '123', '--url', 'https://example.com', '--json'])).toThrow('navigate is not part of the TabBridge MVP command set')
   })

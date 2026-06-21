@@ -70,7 +70,7 @@ describe('CLI main runner', () => {
     })
 
     expect(exitCode).toBe(0)
-    expect(writes).toEqual([{ browser: 'chrome', extensionId: 'abcdefghijklmnopabcdefghijklmnop', wrapperPath: process.execPath }])
+    expect(writes).toEqual([{ browser: 'chrome', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }])
     expect(stdout.chunks).toEqual(['{"ok":true,"data":{"path":"/Users/alice/manifest.json","manifest":{"name":"com.tabbridge.host","description":"TabBridge native host","path":"/Users/alice/bin/tabbridge-native-host-wrapper","type":"stdio","allowed_origins":["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]}}}\n'])
     expect(stderr.chunks).toEqual([])
   })
@@ -114,6 +114,48 @@ describe('CLI main runner', () => {
     expect(exitCode).toBe(0)
     expect(doctorInputs).toEqual([{ browser: 'chrome' }])
     expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":false,"bridgeState":"extension_asleep","errorCode":"EXTENSION_NOT_CONNECTED","checks":[]}}\n'])
+    expect(stderr.chunks).toEqual([])
+  })
+
+  it('passes status browser and extension id flags to diagnostics', async () => {
+    const stdout = captureWritable()
+    const stderr = captureWritable()
+    const doctorInputs: unknown[] = []
+
+    const exitCode = await run({
+      argv: ['status', '--browser', 'chromium', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'],
+      stdout: stdout.writable,
+      stderr: stderr.writable,
+      runDoctor: async (input) => {
+        doctorInputs.push(input)
+        return { ok: true, bridgeState: 'connected', checks: [] }
+      },
+    })
+
+    expect(exitCode).toBe(0)
+    expect(doctorInputs).toEqual([{ browser: 'chromium', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }])
+    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":true,"bridgeState":"connected","checks":[]}}\n'])
+    expect(stderr.chunks).toEqual([])
+  })
+
+  it('passes doctor browser and extension id flags to diagnostics', async () => {
+    const stdout = captureWritable()
+    const stderr = captureWritable()
+    const doctorInputs: unknown[] = []
+
+    const exitCode = await run({
+      argv: ['doctor', '--browser', 'chromium', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'],
+      stdout: stdout.writable,
+      stderr: stderr.writable,
+      runDoctor: async (input) => {
+        doctorInputs.push(input)
+        return { ok: true, bridgeState: 'connected', checks: [] }
+      },
+    })
+
+    expect(exitCode).toBe(0)
+    expect(doctorInputs).toEqual([{ browser: 'chromium', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }])
+    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":true,"bridgeState":"connected","checks":[]}}\n'])
     expect(stderr.chunks).toEqual([])
   })
 
