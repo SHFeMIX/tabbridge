@@ -30,7 +30,7 @@
 
 ## Commit
 - Message: `feat: add TabBridge native host bridge`
-- Hash: recorded in the final Task 3 response after commit creation.
+- Hash: `ef976b1`
 
 ## Self-review
 - Reused `@tabbridge/shared` protocol types, constants, limits, and shared error helpers instead of redefining the bridge protocol.
