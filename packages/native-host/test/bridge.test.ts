@@ -261,4 +261,41 @@ describe('BridgeController request forwarding', () => {
       error: { code: 'PROTOCOL_VERSION_MISMATCH', recoverable: true },
     })
   })
+
+  it('routes non-hello messages with string ids to response validation', async () => {
+    const { routeNativeMessage } = await import('../src/main.js') as typeof import('../src/main.js') & {
+      routeNativeMessage?: (bridge: BridgeController, message: unknown) => void
+    }
+    expect(routeNativeMessage).toBeTypeOf('function')
+
+    for (const response of [
+      { id: 'req_missing_ok', protocolVersion: 1 },
+      { id: 'req_string_ok', protocolVersion: 1, ok: 'true', payload: { tabs: [] } },
+    ]) {
+      const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+      bridge.acceptHello({
+        type: 'hello',
+        protocolVersion: 1,
+        role: 'extension',
+        version: '0.1.0',
+        capabilities: { commands: [], snapshot: [], permissions: [] },
+      })
+      const request = createBridgeRequest({
+        id: response.id,
+        source: 'cli',
+        target: 'extension',
+        command: 'tabs.list',
+        payload: {},
+        createdAt: 1782012345000,
+      })
+
+      const result = bridge.forward(request, () => undefined)
+      routeNativeMessage?.(bridge, response)
+
+      await expect(result).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'PROTOCOL_VERSION_MISMATCH', recoverable: true },
+      })
+    }
+  })
 })

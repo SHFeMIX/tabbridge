@@ -1,6 +1,6 @@
 import type { Server } from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { PROTOCOL_VERSION, type BridgeHello, type BridgeResponse } from '@tabbridge/shared'
+import { PROTOCOL_VERSION, type BridgeHello } from '@tabbridge/shared'
 import { BridgeController } from './bridge.js'
 import { startIpcServer } from './ipc-server.js'
 import { encodeNativeMessage, NativeMessageDecoder } from './native-framing.js'
@@ -22,6 +22,15 @@ function nativeHostHello(): BridgeHello {
       permissions: ['nativeMessaging'],
     },
   }
+}
+
+export function routeNativeMessage(bridge: BridgeController, message: unknown): void {
+  if (!isRecord(message)) return
+  if (message.type === 'hello') {
+    bridge.acceptHello(message)
+    return
+  }
+  if (typeof message.id === 'string') bridge.acceptResponse(message)
 }
 
 function closeIpcServer(server: Server | undefined): void {
@@ -50,14 +59,7 @@ export async function runNativeHost(): Promise<void> {
   process.stdin.on('data', (chunk: Buffer) => {
     try {
       for (const message of decoder.push(chunk)) {
-        if (!isRecord(message)) continue
-        if (message.type === 'hello') {
-          bridge.acceptHello(message as BridgeHello)
-          continue
-        }
-        if (typeof message.id === 'string' && typeof message.ok === 'boolean') {
-          bridge.acceptResponse(message as BridgeResponse)
-        }
+        routeNativeMessage(bridge, message)
       }
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)

@@ -86,3 +86,14 @@
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.
 - Commit: `1e0fc1e` (`fix: close native host IPC lifecycle gaps`).
 - Concerns: malformed extension responses are mapped to the existing shared `PROTOCOL_VERSION_MISMATCH` code because there is no dedicated public malformed-response error code in the MVP shared error surface.
+
+## Final-review malformed native response routing fix
+- Red verification setup: dependencies were initially absent in this isolated worktree, so the first native-host test command failed before Vitest could run; after `pnpm install --frozen-lockfile` and building `@tabbridge/shared`, the targeted red test failed as expected with `routeNativeMessage` undefined.
+- Red verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a/packages/native-host" test -- test/bridge.test.ts` failed while malformed non-hello native messages with string ids could not be routed through a helper to `BridgeController.acceptResponse` validation.
+- Fix: extracted `routeNativeMessage(bridge, message)` from `runNativeHost`; hello messages still route to `acceptHello`, and every other object with a string `id` now routes to `acceptResponse` so `BridgeController` validates `protocolVersion`, `ok`, `payload`, and `error`.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a/packages/native-host" test -- test/bridge.test.ts` passed: 6 files, 26 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a" --filter @tabbridge/native-host test` passed: 6 files, 26 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a" --filter @tabbridge/native-host typecheck` passed.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a" test` passed: 17 files, 70 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/agent-ae7932e07a0629f5a" typecheck` passed.
+- Concerns: no new protocol error code was introduced; malformed routed responses continue to resolve as the existing structured `PROTOCOL_VERSION_MISMATCH` protocol error.
