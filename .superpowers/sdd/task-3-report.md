@@ -71,5 +71,5 @@
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/shared typecheck` passed.
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" test` passed: 17 files, 64 tests.
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.
-- Commit: pending at report-write time; see git history for `fix: expose native host library APIs`.
+- Commit: `bfc41bd` (`fix: expose native host library APIs`).
 - Concerns: `removeStaleSocket()` still throws internal `Error('IPC_SOCKET_ACTIVE')` for an actually active socket, but this is intentionally not part of the public shared `ERROR_CODES` protocol surface.
