@@ -202,4 +202,63 @@ describe('BridgeController request forwarding', () => {
     expect(bridge.acceptResponse({ id: 'req_duplicate', protocolVersion: 1, ok: true, payload: { tabs: [] } })).toBe(true)
     await expect(firstResult).resolves.toEqual({ ok: true, data: { tabs: [] } })
   })
+
+  it('returns a protocol error when a success response is missing its payload', async () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    bridge.acceptHello({
+      type: 'hello',
+      protocolVersion: 1,
+      role: 'extension',
+      version: '0.1.0',
+      capabilities: { commands: [], snapshot: [], permissions: [] },
+    })
+    const request = createBridgeRequest({
+      id: 'req_missing_payload',
+      source: 'cli',
+      target: 'extension',
+      command: 'tabs.list',
+      payload: {},
+      createdAt: 1782012345000,
+    })
+
+    const result = bridge.forward(request, () => undefined)
+    expect(bridge.acceptResponse({ id: 'req_missing_payload', protocolVersion: 1, ok: true } as never)).toBe(true)
+
+    await expect(result).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'PROTOCOL_VERSION_MISMATCH', recoverable: true },
+    })
+  })
+
+  it('returns a protocol error when a failure response has an invalid error object', async () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    bridge.acceptHello({
+      type: 'hello',
+      protocolVersion: 1,
+      role: 'extension',
+      version: '0.1.0',
+      capabilities: { commands: [], snapshot: [], permissions: [] },
+    })
+    const request = createBridgeRequest({
+      id: 'req_invalid_error',
+      source: 'cli',
+      target: 'extension',
+      command: 'tabs.list',
+      payload: {},
+      createdAt: 1782012345000,
+    })
+
+    const result = bridge.forward(request, () => undefined)
+    expect(bridge.acceptResponse({
+      id: 'req_invalid_error',
+      protocolVersion: 1,
+      ok: false,
+      error: { code: 'NOT_A_SHARED_CODE', message: 'bad', recoverable: true },
+    } as never)).toBe(true)
+
+    await expect(result).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'PROTOCOL_VERSION_MISMATCH', recoverable: true },
+    })
+  })
 })

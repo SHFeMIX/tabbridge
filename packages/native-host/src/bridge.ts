@@ -1,4 +1,5 @@
 import {
+  ERROR_CODES,
   PROTOCOL_VERSION,
   bridgeNotConnectedError,
   errorEnvelope,
@@ -69,6 +70,45 @@ function duplicateRequestIdError(id: string): TabBridgeError {
     message: `A bridge request with id ${id} is already in flight.`,
     recoverable: false,
   }
+}
+
+function malformedResponseError(id: string, field: string): BridgeResponse {
+  return {
+    id,
+    protocolVersion: PROTOCOL_VERSION,
+    ok: false,
+    error: {
+      code: 'PROTOCOL_VERSION_MISMATCH',
+      message: `Extension response did not match the native host bridge protocol: ${field}.`,
+      recoverable: true,
+      suggestedCommand: 'tabbridge status --json',
+    },
+  }
+}
+
+function isTabBridgeError(value: unknown): value is TabBridgeError {
+  if (!isRecord(value)) return false
+  return typeof value.code === 'string'
+    && ERROR_CODES.includes(value.code as never)
+    && typeof value.message === 'string'
+    && typeof value.recoverable === 'boolean'
+    && (value.suggestedCommand === undefined || typeof value.suggestedCommand === 'string')
+    && (value.approvalId === undefined || typeof value.approvalId === 'string')
+    && (value.pollCommand === undefined || typeof value.pollCommand === 'string')
+    && (value.expiresAt === undefined || typeof value.expiresAt === 'number')
+}
+
+function validateExtensionResponse(response: unknown, expectedId: string): BridgeResponse {
+  if (!isRecord(response)) return malformedResponseError(expectedId, 'response')
+  if (response.id !== expectedId) return malformedResponseError(expectedId, 'id')
+  if (response.protocolVersion !== PROTOCOL_VERSION) return malformedResponseError(expectedId, 'protocolVersion')
+  if (typeof response.ok !== 'boolean') return malformedResponseError(expectedId, 'ok')
+  if (response.ok) {
+    if (!Object.hasOwn(response, 'payload')) return malformedResponseError(expectedId, 'payload')
+    return { id: expectedId, protocolVersion: PROTOCOL_VERSION, ok: true, payload: response.payload }
+  }
+  if (!isTabBridgeError(response.error)) return malformedResponseError(expectedId, 'error')
+  return { id: expectedId, protocolVersion: PROTOCOL_VERSION, ok: false, error: response.error }
 }
 
 export class BridgeController {
@@ -142,13 +182,14 @@ export class BridgeController {
     return errorEnvelope(response.error)
   }
 
-  acceptResponse(response: BridgeResponse): boolean {
+  acceptResponse(response: unknown): boolean {
+    if (!isRecord(response) || typeof response.id !== 'string') return false
     const pending = this.pending.get(response.id)
     if (!pending) return false
 
     clearTimeout(pending.timer)
     this.pending.delete(response.id)
-    pending.resolve(response)
+    pending.resolve(validateExtensionResponse(response, response.id))
     return true
   }
 }

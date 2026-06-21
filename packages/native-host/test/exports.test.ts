@@ -49,4 +49,30 @@ describe('native-host executable entrypoint', () => {
 
     expect(startIpcServer).not.toHaveBeenCalled()
   })
+
+  it('closes the IPC server when native stdin ends', async () => {
+    const { startIpcServer } = await import('../src/ipc-server.js')
+    const close = vi.fn((callback?: (error?: Error) => void) => {
+      callback?.()
+      return undefined
+    })
+    vi.mocked(startIpcServer).mockResolvedValueOnce({ close } as never)
+    const originalDataListeners = process.stdin.listeners('data')
+    const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    try {
+      const { runNativeHost } = await import('../src/main.js')
+      await runNativeHost()
+      process.stdin.emit('end')
+
+      expect(close).toHaveBeenCalledTimes(1)
+    } finally {
+      stdoutWrite.mockRestore()
+      for (const listener of process.stdin.listeners('data')) {
+        if (!originalDataListeners.includes(listener)) {
+          process.stdin.off('data', listener as (...args: unknown[]) => void)
+        }
+      }
+    }
+  })
 })

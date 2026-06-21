@@ -93,18 +93,20 @@ export async function startIpcServer(options: IpcServerOptions): Promise<net.Ser
   const server = net.createServer((socket) => {
     let buffer = ''
     let bufferedBytes = 0
+    let draining = false
+    let closed = false
 
-    socket.on('data', (chunk) => {
-      bufferedBytes += chunk.byteLength
-      if (bufferedBytes > maxRequestBytes) {
-        socket.write(`${JSON.stringify(requestTooLargeError())}\n`)
-        socket.end()
-        return
-      }
+    const endWithResponse = (response: BridgeResponse): void => {
+      if (closed) return
+      closed = true
+      socket.write(`${JSON.stringify(response)}\n`)
+      socket.end()
+    }
 
-      buffer += chunk.toString('utf8')
-
-      void (async () => {
+    const drain = async (): Promise<void> => {
+      if (draining || closed) return
+      draining = true
+      try {
         let newline = buffer.indexOf('\n')
         while (newline >= 0) {
           const line = buffer.slice(0, newline)
@@ -116,25 +118,37 @@ export async function startIpcServer(options: IpcServerOptions): Promise<net.Ser
           try {
             parsed = JSON.parse(line) as unknown
           } catch {
-            socket.write(`${JSON.stringify(protocolError('unknown'))}\n`)
-            socket.end()
+            endWithResponse(protocolError('unknown'))
             return
           }
 
           if (!isRequest(parsed)) {
             const id = typeof (parsed as Partial<BridgeRequest> | undefined)?.id === 'string' ? (parsed as BridgeRequest).id : 'unknown'
-            socket.write(`${JSON.stringify(protocolError(id))}\n`)
-            socket.end()
+            endWithResponse(protocolError(id))
             return
           }
 
           const response = toBridgeResponse(parsed, await options.onRequest(parsed))
-          socket.write(`${JSON.stringify(response)}\n`)
-          socket.end()
+          endWithResponse(response)
+          return
         }
-      })().catch(() => {
-        socket.write(`${JSON.stringify(protocolError('unknown'))}\n`)
-        socket.end()
+      } finally {
+        draining = false
+      }
+    }
+
+    socket.on('data', (chunk) => {
+      if (closed) return
+      bufferedBytes += chunk.byteLength
+      if (bufferedBytes > maxRequestBytes) {
+        endWithResponse(requestTooLargeError())
+        return
+      }
+
+      buffer += chunk.toString('utf8')
+
+      void drain().catch(() => {
+        endWithResponse(protocolError('unknown'))
       })
     })
   })

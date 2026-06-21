@@ -23,9 +23,9 @@ export class NativeMessageDecoder {
       if (length > CHROME_TO_NATIVE_HOST_MAX_BYTES) throw new Error('MESSAGE_TOO_LARGE')
       if (this.buffer.byteLength < 4 + length) break
 
-      const body = this.buffer.subarray(4, 4 + length).toString('utf8')
-      messages.push(JSON.parse(body))
+      const frame = this.buffer.subarray(4, 4 + length)
       this.buffer = this.buffer.subarray(4 + length)
+      messages.push(JSON.parse(frame.toString('utf8')))
     }
 
     return messages

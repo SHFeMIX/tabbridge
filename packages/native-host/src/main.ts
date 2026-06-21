@@ -1,3 +1,4 @@
+import type { Server } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION, type BridgeHello, type BridgeResponse } from '@tabbridge/shared'
 import { BridgeController } from './bridge.js'
@@ -23,11 +24,26 @@ function nativeHostHello(): BridgeHello {
   }
 }
 
+function closeIpcServer(server: Server | undefined): void {
+  server?.close((error) => {
+    if (error) process.stderr.write(`${error.stack ?? error.message}\n`)
+  })
+}
+
 export async function runNativeHost(): Promise<void> {
   const paths = createRuntimePaths()
   await ensureRuntimeSecurity(paths)
   const bridge = new BridgeController({ requestTimeoutMs: 30_000 })
   const decoder = new NativeMessageDecoder()
+  let ipcServer: Server | undefined
+  let shuttingDown = false
+
+  const shutdown = () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    bridge.disconnect()
+    closeIpcServer(ipcServer)
+  }
 
   process.stdout.write(encodeNativeMessage(nativeHostHello()))
 
@@ -48,14 +64,16 @@ export async function runNativeHost(): Promise<void> {
     }
   })
 
-  process.stdin.once('end', () => bridge.disconnect())
+  process.stdin.once('end', shutdown)
+  process.stdin.once('close', shutdown)
 
-  await startIpcServer({
+  ipcServer = await startIpcServer({
     socketPath: paths.socketPath,
     onRequest: async (request) => bridge.forward(request, (bridgeRequest) => {
       process.stdout.write(encodeNativeMessage(bridgeRequest))
     }),
   })
+  if (shuttingDown) closeIpcServer(ipcServer)
 }
 
 function isExecutedEntrypoint(): boolean {

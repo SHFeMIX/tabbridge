@@ -73,3 +73,16 @@
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.
 - Commit: `bfc41bd` (`fix: expose native host library APIs`).
 - Concerns: `removeStaleSocket()` still throws internal `Error('IPC_SOCKET_ACTIVE')` for an actually active socket, but this is intentionally not part of the public shared `ERROR_CODES` protocol surface.
+
+## Final-review lifecycle/validation fix
+- Red verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host test` failed with the new regressions: malformed native JSON frames poisoned `NativeMessageDecoder`, malformed extension success/failure responses produced invalid CLI envelopes, native stdin end did not close the IPC server, and the IPC concurrent-drain regression exposed an unsafe second write path.
+- Fix: advanced the native-message decoder buffer before parsing complete frames so a malformed frame cannot block later frames.
+- Fix: closed the stored IPC `net.Server` on native stdin `end`/`close`, with idempotent shutdown handling around startup races.
+- Fix: runtime-validated extension responses before resolving pending CLI requests, including `id`, `protocolVersion`, `ok`, success `payload`, and failure `TabBridgeError` shape, mapping invalid envelopes to structured `PROTOCOL_VERSION_MISMATCH` protocol errors.
+- Fix: serialized IPC socket draining with a one-response socket lifecycle guard to avoid concurrent shared-buffer mutation and late writes after `socket.end()`.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host test` passed: 6 files, 25 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host typecheck` passed.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" test` passed: 17 files, 69 tests.
+- Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.
+- Commit: pending (`fix: close native host IPC lifecycle gaps`).
+- Concerns: malformed extension responses are mapped to the existing shared `PROTOCOL_VERSION_MISMATCH` code because there is no dedicated public malformed-response error code in the MVP shared error surface.

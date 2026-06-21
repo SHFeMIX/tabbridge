@@ -18,4 +18,15 @@ describe('Chrome Native Messaging framing', () => {
     expect(decoder.push(encoded.subarray(0, 3))).toEqual([])
     expect(decoder.push(encoded.subarray(3))).toEqual([{ id: 'req_1', ok: true }])
   })
+
+  it('advances past malformed complete JSON frames before reporting the parse error', () => {
+    const decoder = new NativeMessageDecoder()
+    const malformedBody = Buffer.from('{not json', 'utf8')
+    const malformedHeader = Buffer.alloc(4)
+    malformedHeader.writeUInt32LE(malformedBody.byteLength, 0)
+    const valid = encodeNativeMessage({ id: 'req_after_malformed', ok: true })
+
+    expect(() => decoder.push(Buffer.concat([malformedHeader, malformedBody, valid]))).toThrow(SyntaxError)
+    expect(decoder.push(Buffer.alloc(0))).toEqual([{ id: 'req_after_malformed', ok: true }])
+  })
 })

@@ -18,9 +18,9 @@ async function socketPath(): Promise<string> {
   return join(dir, 'bridge.sock')
 }
 
-function request(): BridgeRequest {
+function request(id = 'req_ipc'): BridgeRequest {
   return createBridgeRequest({
-    id: 'req_ipc',
+    id,
     source: 'cli',
     target: 'extension',
     command: 'tabs.list',
@@ -61,6 +61,21 @@ async function sendRaw(path: string, value: string): Promise<string> {
       }
     })
     socket.once('end', () => resolve(buffer))
+  })
+}
+
+async function readLine(socket: net.Socket): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    let buffer = ''
+    socket.once('error', reject)
+    socket.on('data', function onData(chunk) {
+      buffer += chunk.toString('utf8')
+      const newline = buffer.indexOf('\n')
+      if (newline >= 0) {
+        socket.off('data', onData)
+        resolve(buffer.slice(0, newline))
+      }
+    })
   })
 }
 
@@ -140,6 +155,51 @@ describe('IPC server', () => {
         error: { code: 'MESSAGE_TOO_LARGE', recoverable: false },
       })
     } finally {
+      await closeServer(server)
+    }
+  })
+
+  it('does not process another request on the same socket while one is pending', async () => {
+    const path = await socketPath()
+    let releaseFirst!: () => void
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstStarted!: () => void
+    const firstStart = new Promise<void>((resolve) => {
+      firstStarted = resolve
+    })
+    const seen: string[] = []
+    const server = await startIpcServer({
+      socketPath: path,
+      onRequest: async (incoming) => {
+        seen.push(incoming.id)
+        if (incoming.id === 'req_first') {
+          firstStarted()
+          await firstRelease
+        }
+        return okEnvelope({ id: incoming.id })
+      },
+    })
+    const socket = net.createConnection(path)
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('connect', resolve)
+        socket.once('error', reject)
+      })
+      socket.write(`${JSON.stringify(request('req_first'))}\n`)
+      await firstStart
+      socket.write(`${JSON.stringify(request('req_second'))}\n`)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      expect(seen).toEqual(['req_first'])
+      const firstResponse = readLine(socket)
+      releaseFirst()
+
+      await expect(firstResponse).resolves.toContain('req_first')
+    } finally {
+      socket.destroy()
       await closeServer(server)
     }
   })
