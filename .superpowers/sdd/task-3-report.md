@@ -84,5 +84,5 @@
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" --filter @tabbridge/native-host typecheck` passed.
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" test` passed: 17 files, 69 tests.
 - Green verification: `pnpm --dir "/Users/alan/Desktop/agent-browser-extension/.claude/worktrees/0621plan-sdd" typecheck` passed.
-- Commit: pending (`fix: close native host IPC lifecycle gaps`).
+- Commit: `1e0fc1e` (`fix: close native host IPC lifecycle gaps`).
 - Concerns: malformed extension responses are mapped to the existing shared `PROTOCOL_VERSION_MISMATCH` code because there is no dedicated public malformed-response error code in the MVP shared error surface.
