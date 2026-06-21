@@ -4,10 +4,38 @@ import { PROTOCOL_VERSION, type BridgeRequest, type BridgeResponse, type CliEnve
 
 export type IpcServerOptions = {
   socketPath: string
+  maxRequestBytes?: number
   onRequest(request: BridgeRequest): Promise<CliEnvelope<unknown>>
 }
 
+export const DEFAULT_MAX_IPC_REQUEST_BYTES = 1024 * 1024
+
+async function canConnect(socketPath: string): Promise<boolean> {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection(socketPath)
+
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      socket.destroy()
+      if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') {
+        resolve(false)
+        return
+      }
+      if (error.code === 'ENOTSOCK') {
+        resolve(false)
+        return
+      }
+      reject(error)
+    })
+  })
+}
+
 export async function removeStaleSocket(socketPath: string): Promise<void> {
+  if (await canConnect(socketPath)) throw new Error('IPC_SOCKET_ACTIVE')
+
   try {
     await fs.unlink(socketPath)
   } catch (error) {
@@ -25,6 +53,19 @@ function protocolError(id: string): BridgeResponse {
       message: 'CLI request did not match the native host IPC protocol.',
       recoverable: true,
       suggestedCommand: 'tabbridge status --json',
+    },
+  }
+}
+
+function requestTooLargeError(): BridgeResponse {
+  return {
+    id: 'unknown',
+    protocolVersion: PROTOCOL_VERSION,
+    ok: false,
+    error: {
+      code: 'IPC_REQUEST_TOO_LARGE',
+      message: 'IPC request exceeded the native host maximum request line size.',
+      recoverable: false,
     },
   }
 }
@@ -47,11 +88,20 @@ function isRequest(value: unknown): value is BridgeRequest {
 
 export async function startIpcServer(options: IpcServerOptions): Promise<net.Server> {
   await removeStaleSocket(options.socketPath)
+  const maxRequestBytes = options.maxRequestBytes ?? DEFAULT_MAX_IPC_REQUEST_BYTES
 
   const server = net.createServer((socket) => {
     let buffer = ''
+    let bufferedBytes = 0
 
     socket.on('data', (chunk) => {
+      bufferedBytes += chunk.byteLength
+      if (bufferedBytes > maxRequestBytes) {
+        socket.write(`${JSON.stringify(requestTooLargeError())}\n`)
+        socket.end()
+        return
+      }
+
       buffer += chunk.toString('utf8')
 
       void (async () => {
@@ -59,6 +109,7 @@ export async function startIpcServer(options: IpcServerOptions): Promise<net.Ser
         while (newline >= 0) {
           const line = buffer.slice(0, newline)
           buffer = buffer.slice(newline + 1)
+          bufferedBytes = Buffer.byteLength(buffer, 'utf8')
           newline = buffer.indexOf('\n')
 
           let parsed: unknown

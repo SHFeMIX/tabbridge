@@ -25,6 +25,39 @@ describe('BridgeController', () => {
     expect(bridge.status()).toMatchObject({ connected: true, state: 'connected', extensionId: 'abcdefghijklmnopabcdefghijklmnop' })
   })
 
+  it('rejects malformed extension hello values without connecting', () => {
+    const malformedHellos: Array<[string, unknown]> = [
+      ['type', {
+        type: 'request',
+        protocolVersion: 1,
+        role: 'extension',
+        version: '0.1.0',
+        capabilities: { commands: [], snapshot: [], permissions: [] },
+      }],
+      ['version', {
+        type: 'hello',
+        protocolVersion: 1,
+        role: 'extension',
+        version: '',
+        capabilities: { commands: [], snapshot: [], permissions: [] },
+      }],
+      ['capabilities.commands', {
+        type: 'hello',
+        protocolVersion: 1,
+        role: 'extension',
+        version: '0.1.0',
+        capabilities: { commands: 'tabs.list', snapshot: [], permissions: [] },
+      }],
+    ]
+
+    for (const [field, hello] of malformedHellos) {
+      const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+
+      expect(() => bridge.acceptHello(hello as Parameters<BridgeController['acceptHello']>[0])).toThrow(new RegExp(`MALFORMED_EXTENSION_HELLO.*${field}`))
+      expect(bridge.status()).toEqual({ connected: false, state: 'extension_asleep' })
+    }
+  })
+
   it('rejects protocol version mismatch', () => {
     const bridge = new BridgeController({ requestTimeoutMs: 1000 })
     expect(() => bridge.acceptHello({
@@ -125,5 +158,48 @@ describe('BridgeController request forwarding', () => {
     expect(sent).toEqual(['req_first', 'req_second'])
     bridge.acceptResponse({ id: 'req_second', protocolVersion: 1, ok: true, payload: { done: 'second' } })
     await expect(secondResult).resolves.toEqual({ ok: true, data: { done: 'second' } })
+  })
+
+  it('rejects duplicate in-flight request ids without overwriting pending requests', async () => {
+    const bridge = new BridgeController({ requestTimeoutMs: 1000 })
+    bridge.acceptHello({
+      type: 'hello',
+      protocolVersion: 1,
+      role: 'extension',
+      version: '0.1.0',
+      capabilities: { commands: [], snapshot: [], permissions: [] },
+    })
+    const first = createBridgeRequest({
+      id: 'req_duplicate',
+      source: 'cli',
+      target: 'extension',
+      command: 'tabs.list',
+      payload: {},
+      createdAt: 1782012345000,
+    })
+    const second = createBridgeRequest({
+      id: 'req_duplicate',
+      source: 'cli',
+      target: 'extension',
+      command: 'tabs.list',
+      payload: {},
+      createdAt: 1782012345001,
+    })
+    const sent: string[] = []
+
+    const firstResult = bridge.forward(first, (outgoing) => {
+      sent.push(outgoing.id)
+    })
+    const secondResult = bridge.forward(second, (outgoing) => {
+      sent.push(outgoing.id)
+    })
+
+    await expect(secondResult).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'DUPLICATE_BRIDGE_REQUEST_ID', recoverable: false },
+    })
+    expect(sent).toEqual(['req_duplicate'])
+    expect(bridge.acceptResponse({ id: 'req_duplicate', protocolVersion: 1, ok: true, payload: { tabs: [] } })).toBe(true)
+    await expect(firstResult).resolves.toEqual({ ok: true, data: { tabs: [] } })
   })
 })

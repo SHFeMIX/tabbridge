@@ -38,6 +38,39 @@ function timeoutError(): TabBridgeError {
   }
 }
 
+function malformedHello(field: string): Error {
+  return new Error(`MALFORMED_EXTENSION_HELLO: ${field}`)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function validateExtensionHello(value: unknown): BridgeHello {
+  if (!isRecord(value)) throw malformedHello('hello')
+  if (value.type !== 'hello') throw malformedHello('type')
+  if (value.protocolVersion !== PROTOCOL_VERSION) throw new Error('PROTOCOL_VERSION_MISMATCH')
+  if (value.role !== 'extension') throw malformedHello('role')
+  if (typeof value.version !== 'string' || value.version.length === 0) throw malformedHello('version')
+
+  const capabilities = value.capabilities
+  if (!isRecord(capabilities)) throw malformedHello('capabilities')
+  if (!Array.isArray(capabilities.commands)) throw malformedHello('capabilities.commands')
+  if (!Array.isArray(capabilities.snapshot)) throw malformedHello('capabilities.snapshot')
+  if (!Array.isArray(capabilities.permissions)) throw malformedHello('capabilities.permissions')
+  if (value.extensionId !== undefined && typeof value.extensionId !== 'string') throw malformedHello('extensionId')
+
+  return value as BridgeHello
+}
+
+function duplicateRequestIdError(id: string): TabBridgeError {
+  return {
+    code: 'DUPLICATE_BRIDGE_REQUEST_ID',
+    message: `A bridge request with id ${id} is already in flight.`,
+    recoverable: false,
+  }
+}
+
 export class BridgeController {
   private extensionHello: BridgeHello | undefined
   private readonly pending = new Map<string, PendingRequest>()
@@ -57,14 +90,8 @@ export class BridgeController {
     return status
   }
 
-  acceptHello(hello: BridgeHello): void {
-    if (hello.protocolVersion !== PROTOCOL_VERSION) {
-      throw new Error('PROTOCOL_VERSION_MISMATCH')
-    }
-    if (hello.role !== 'extension') {
-      throw new Error('Expected extension hello')
-    }
-    this.extensionHello = hello
+  acceptHello(hello: unknown): void {
+    this.extensionHello = validateExtensionHello(hello)
   }
 
   disconnect(): void {
@@ -84,6 +111,7 @@ export class BridgeController {
 
   private async forwardNow(request: BridgeRequest, sendToExtension: (request: BridgeRequest) => void | Promise<void>): Promise<CliEnvelope<unknown>> {
     if (!this.extensionHello) return errorEnvelope(bridgeNotConnectedError('extension_asleep'))
+    if (this.pending.has(request.id)) return errorEnvelope(duplicateRequestIdError(request.id))
 
     const response = await new Promise<BridgeResponse>((resolve) => {
       const timer = setTimeout(() => {
