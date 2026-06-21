@@ -1,0 +1,30 @@
+{
+  "name": "@tabbridge/chrome-extension",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build --browser chrome",
+    "test": "vitest --run",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "vue-tsc --noEmit",
+    "clean": "rm -rf .output .wxt dist"
+  },
+  "dependencies": {
+    "@tabbridge/shared": "workspace:*",
+    "vue": "catalog:"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.2.0",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/test-utils": "catalog:",
+    "jsdom": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "^6.3.4",
+    "vitest": "catalog:",
+    "vue-tsc": "^2.1.0",
+    "wxt": "catalog:"
+  }
+}

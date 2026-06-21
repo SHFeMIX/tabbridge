@@ -1,0 +1,37 @@
+{
+  "name": "@tabbridge/native-host",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./main": {
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
+    }
+  },
+  "bin": {
+    "tabbridge-native-host": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/main.ts --format esm --dts --clean && node -e \"const fs=require('node:fs');const path='dist/main.js';const source=fs.readFileSync(path,'utf8');if(!source.startsWith('#!/usr/bin/env node')) fs.writeFileSync(path,'#!/usr/bin/env node\\n'+source);fs.chmodSync(path,0o755)\"",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tabbridge/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
