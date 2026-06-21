@@ -52,4 +52,38 @@ describe('approval state machine', () => {
       executed: false,
     })
   })
+
+  it('expires pending approvals instead of approving after the approval deadline', () => {
+    const pending = {
+      id: 'appr_789',
+      kind: 'site-access' as const,
+      status: 'pending' as const,
+      createdAt: 1782010000000,
+      expiresAt: 1782010300000,
+      summary: 'Allow docs.example.com',
+      executed: false,
+    }
+
+    expect(transitionApproval(pending, { type: 'approve', now: 1782010300001 })).toMatchObject({
+      status: 'expired',
+      executed: false,
+    })
+  })
+
+  it('expires approved approvals instead of executing after the approval deadline', () => {
+    const approved = {
+      id: 'appr_987',
+      kind: 'high-risk-action' as const,
+      status: 'approved' as const,
+      createdAt: 1782010000000,
+      expiresAt: 1782010300000,
+      summary: 'Click Delete repository',
+      executed: false,
+    }
+
+    expect(transitionApproval(approved, { type: 'mark-executed', now: 1782010300001 })).toMatchObject({
+      status: 'expired',
+      executed: false,
+    })
+  })
 })

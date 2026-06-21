@@ -59,7 +59,8 @@ export function originFromUrl(url: string): string {
 }
 
 export function hostPermissionPatternFromOrigin(origin: string): string {
-  return `${origin}/*`
+  const parsed = new URL(origin)
+  return `${parsed.protocol}//${parsed.hostname}/*`
 }
 
 export function createSiteGrant(input: { tabId: number; origin: string; grantedByUserAt: number }): SiteGrant {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSiteGrant, redactChromeTab } from '../src/index.js'
+import { createSiteGrant, hostPermissionPatternFromOrigin, redactChromeTab } from '../src/index.js'
 
 describe('tab metadata and grants', () => {
   it('redacts full URL and favicon from discovery output', () => {
@@ -36,5 +36,10 @@ describe('tab metadata and grants', () => {
       expiresAt: 1782011800000,
       source: 'user-click',
     })
+  })
+
+  it('normalizes host permission patterns by removing origin ports', () => {
+    expect(hostPermissionPatternFromOrigin('https://localhost:5173')).toBe('https://localhost/*')
+    expect(hostPermissionPatternFromOrigin('http://127.0.0.1:3000')).toBe('http://127.0.0.1/*')
   })
 })

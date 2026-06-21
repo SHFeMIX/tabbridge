@@ -29,4 +29,25 @@ describe('risk classifier', () => {
       reasons: ['field accepts password or credential-like input'],
     })
   })
+
+  it('preserves collected reasons when classifying explicitly dangerous commands', () => {
+    expect(classifyRisk({
+      command: 'dangerous-click',
+      role: 'button',
+      name: 'Delete repository',
+      text: 'Delete repository',
+      usesCoordinates: true,
+      willNavigate: true,
+      domainSensitive: true,
+    })).toEqual({
+      risk: 'dangerous',
+      reasons: [
+        "element text contains 'delete'",
+        'coordinate action cannot be tied to a stable semantic ref',
+        'action may navigate the current tab',
+        'domain is configured as sensitive',
+        'command is explicitly dangerous',
+      ],
+    })
+  })
 })

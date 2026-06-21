@@ -16,13 +16,14 @@ export type BridgeRequest = {
   createdAt: number
 }
 
-export type BridgeResponse = {
+type BridgeResponseBase = {
   id: string
   protocolVersion: typeof PROTOCOL_VERSION
-  ok: boolean
-  payload?: unknown
-  error?: TabBridgeError
 }
+
+export type BridgeResponse =
+  | (BridgeResponseBase & { ok: true; payload: unknown; error?: never })
+  | (BridgeResponseBase & { ok: false; error: TabBridgeError; payload?: never })
 
 export type BridgeHello = {
   type: 'hello'

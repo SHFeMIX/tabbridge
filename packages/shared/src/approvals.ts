@@ -49,6 +49,10 @@ export function transitionApproval(record: ApprovalRecord, transition: ApprovalT
     return record
   }
 
+  if (transition.now > record.expiresAt) {
+    return { ...record, status: 'expired', executed: false }
+  }
+
   if (transition.type === 'approve') {
     return { ...record, status: 'approved' }
   }

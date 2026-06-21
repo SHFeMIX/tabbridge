@@ -47,7 +47,7 @@ export function classifyRisk(input: RiskInput): RiskClassification {
   }
 
   if (input.command.includes('dangerous')) {
-    return { risk: 'dangerous', reasons: ['command is explicitly dangerous'] }
+    return { risk: 'dangerous', reasons: [...reasons, 'command is explicitly dangerous'] }
   }
 
   if (reasons.length > 0) {

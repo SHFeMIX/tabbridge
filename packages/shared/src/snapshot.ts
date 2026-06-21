@@ -27,16 +27,18 @@ export type SnapshotFrame = {
   tree?: SnapshotElement[]
 }
 
-export type PageSnapshot = {
+type PageSnapshotBase = {
   tabId: number
   snapshotId: string
   title: string
   domain: string
-  url?: string
-  urlVisible: boolean
   viewport: ViewportSnapshot
   frames: SnapshotFrame[]
 }
+
+export type PageSnapshot =
+  | (PageSnapshotBase & { urlVisible: true; url: string })
+  | (PageSnapshotBase & { urlVisible: false; url?: never })
 
 export type ElementRefRecord = {
   snapshotId: string
