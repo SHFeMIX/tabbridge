@@ -35,6 +35,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@tabbridge/native-host':
+        specifier: workspace:*
+        version: link:../native-host
       '@tabbridge/shared':
         specifier: workspace:*
         version: link:../shared
