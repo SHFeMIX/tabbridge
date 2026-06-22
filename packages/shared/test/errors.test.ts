@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ERROR_CODES, bridgeNotConnectedError, refStaleError, tabNotAuthorizedError } from '../src/index.js'
+import { ERROR_CODES, bridgeNotConnectedError, refStaleError, tabNotAuthorizedError, tabBridgeErrorToJsonRpc, jsonRpcErrorToTabBridgeError } from '../src/index.js'
 
 describe('TabBridge errors', () => {
   it('exports the exact MVP error code set', () => {
@@ -62,5 +62,30 @@ describe('TabBridge errors', () => {
       recoverable: true,
       suggestedCommand: 'Run tabbridge install-native-host --browser chrome --extension-id <id>, then run tabbridge doctor.',
     })
+  })
+})
+
+describe('JSON-RPC error mapping', () => {
+  it('maps TAB_NOT_AUTHORIZED to a stable JSON-RPC error code', () => {
+    const error = {
+      code: 'TAB_NOT_AUTHORIZED' as const,
+      message: 'Request access before reading this tab.',
+      recoverable: true,
+      suggestedCommand: 'tabbridge tabs request-access --tab 1 --reason x --json',
+    }
+    const rpc = tabBridgeErrorToJsonRpc(error)
+    expect(rpc.code).toBeLessThan(-32000)
+    expect(rpc.message).toBe('TAB_NOT_AUTHORIZED')
+    expect(rpc.data).toEqual(error)
+  })
+
+  it('round-trips through JSON-RPC error data', () => {
+    const original = {
+      code: 'REF_STALE' as const,
+      message: 'stale',
+      recoverable: true,
+    }
+    const rpc = tabBridgeErrorToJsonRpc(original)
+    expect(jsonRpcErrorToTabBridgeError(rpc)?.code).toBe('REF_STALE')
   })
 })

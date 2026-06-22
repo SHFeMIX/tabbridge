@@ -1,5 +1,6 @@
 export * from './approvals.js'
 export * from './errors.js'
+export * from './jsonrpc.js'
 export * from './limits.js'
 export * from './protocol.js'
 export * from './risk.js'

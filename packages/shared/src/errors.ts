@@ -97,3 +97,34 @@ export function bridgeNotConnectedError(state: BridgeDisconnectedState): TabBrid
     suggestedCommand: 'Open Chrome and click the TabBridge extension icon to start the bridge, then run tabbridge status --json.',
   }
 }
+
+import type { JsonRpcError } from './jsonrpc.js'
+
+const JSON_RPC_TABBRIDGE_ERROR_BASE = -32000
+
+export const TAB_BRIDGE_ERROR_CODE_INDEX: Record<TabBridgeErrorCode, number> = Object.fromEntries(
+  ERROR_CODES.map((code, index) => [code, index]),
+) as Record<TabBridgeErrorCode, number>
+
+export function tabBridgeErrorToJsonRpc(error: TabBridgeError): JsonRpcError {
+  return {
+    code: JSON_RPC_TABBRIDGE_ERROR_BASE - TAB_BRIDGE_ERROR_CODE_INDEX[error.code],
+    message: error.code,
+    data: error,
+  }
+}
+
+export function jsonRpcErrorToTabBridgeError(error: JsonRpcError): TabBridgeError | undefined {
+  const data = error.data
+  if (typeof data !== 'object' || data === null) return undefined
+  const candidate = data as Partial<TabBridgeError>
+  if (
+    typeof candidate.code === 'string'
+    && ERROR_CODES.includes(candidate.code as never)
+    && typeof candidate.message === 'string'
+    && typeof candidate.recoverable === 'boolean'
+  ) {
+    return candidate as TabBridgeError
+  }
+  return undefined
+}
