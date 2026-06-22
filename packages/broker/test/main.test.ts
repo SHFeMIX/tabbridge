@@ -46,20 +46,22 @@ describe('runBroker', () => {
     await broker.close()
   })
 
-  it('reuses an existing token file', async () => {
+  it('rotates an existing token file on startup', async () => {
     const existingToken = 'existing-test-token-12345'
     await fs.mkdir(tempPaths.supportDir, { recursive: true })
     await writeToken(tempPaths, existingToken)
 
     const broker = await runBroker(tempPaths)
     const token = await readToken(tempPaths)
-    expect(token).toBe(existingToken)
+    expect(token).toBeDefined()
+    expect(token).not.toBe(existingToken)
 
     await broker.close()
   })
 
   it('can be restarted after close', async () => {
     const broker1 = await runBroker(tempPaths)
+    const token1 = await readToken(tempPaths)
     await broker1.close()
 
     const broker2 = await runBroker(tempPaths)
@@ -67,6 +69,7 @@ describe('runBroker', () => {
 
     const token = await readToken(tempPaths)
     expect(token).toBeDefined()
+    expect(token).not.toBe(token1)
 
     const ws = new WebSocket(`ws://localhost:${broker2.port}`)
     await new Promise<void>((resolve, reject) => {

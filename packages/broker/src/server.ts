@@ -16,9 +16,15 @@ export type BrokerClient = {
   authenticated: boolean
 }
 
+type PendingRequest = {
+  client: BrokerClient
+  timer: ReturnType<typeof setTimeout>
+}
+
 export type BrokerServerOptions = {
   port: number
   token: string
+  requestTimeoutMs?: number
 }
 
 export type BrokerStatus = {
@@ -32,7 +38,10 @@ const STANDARD_ERRORS = {
   invalidRequest: { code: -32600, message: 'Invalid Request' },
   methodNotFound: { code: -32601, message: 'Method not found' },
   internalError: { code: -32603, message: 'Internal error' },
+  duplicatePendingRequest: { code: -32600, message: 'Duplicate pending request id' },
 } as const
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -50,7 +59,7 @@ export class BrokerServer {
   private readonly wss: WebSocketServer
   private readonly clients = new Set<BrokerClient>()
   private extensionClient: BrokerClient | undefined
-  private readonly pending = new Map<string, BrokerClient>()
+  private readonly pending = new Map<string, PendingRequest>()
   private hello: unknown | undefined
   readonly port: number
 
@@ -90,9 +99,9 @@ export class BrokerServer {
       if (this.extensionClient === client) {
         this.extensionClient = undefined
         this.hello = undefined
-      }
-      for (const [id, pendingClient] of this.pending) {
-        if (pendingClient === client) this.pending.delete(id)
+        this.failAllPending(extensionNotConnectedError())
+      } else {
+        this.clearPendingForClient(client)
       }
     })
   }
@@ -127,11 +136,12 @@ export class BrokerServer {
     if (!isRecord(parsed)) return
 
     if (client.role === 'extension') {
+      if (client !== this.extensionClient) return
       if (looksLikeResponse(parsed)) {
-        const pendingCli = this.pending.get(parsed.id)
-        if (pendingCli) {
-          pendingCli.socket.send(JSON.stringify(parsed))
-          this.pending.delete(parsed.id)
+        const pendingRequest = this.pending.get(parsed.id)
+        if (pendingRequest) {
+          this.clearPendingRequest(parsed.id, pendingRequest)
+          pendingRequest.client.socket.send(JSON.stringify(parsed))
         }
         return
       }
@@ -149,26 +159,76 @@ export class BrokerServer {
     }
 
     if (!this.extensionClient || this.extensionClient.socket.readyState !== WebSocket.OPEN) {
-      const error: TabBridgeError = {
-        code: 'EXTENSION_NOT_CONNECTED',
-        message: 'The TabBridge extension is not connected.',
-        recoverable: true,
-        suggestedCommand: 'Open Chrome and click the TabBridge extension icon, then run tabbridge status --json.',
-      }
-      client.socket.send(JSON.stringify(createJsonRpcError(request.id, tabBridgeErrorToJsonRpc(error))))
+      this.sendJsonRpcError(client, request.id, tabBridgeErrorToJsonRpc(extensionNotConnectedError()))
       return
     }
 
-    this.pending.set(request.id, client)
+    if (this.pending.has(request.id)) {
+      this.sendJsonRpcError(client, request.id, STANDARD_ERRORS.duplicatePendingRequest)
+      return
+    }
+
+    const requestId = request.id
+    const timer = setTimeout(() => {
+      const pendingRequest = this.pending.get(requestId)
+      if (!pendingRequest) return
+      this.clearPendingRequest(requestId, pendingRequest)
+      this.sendJsonRpcError(pendingRequest.client, requestId, tabBridgeErrorToJsonRpc(requestTimeoutError()))
+    }, this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS)
+    this.pending.set(requestId, { client, timer })
     this.extensionClient.socket.send(JSON.stringify(request))
+  }
+
+  private clearPendingRequest(id: string, pendingRequest: PendingRequest): void {
+    clearTimeout(pendingRequest.timer)
+    this.pending.delete(id)
+  }
+
+  private clearPendingForClient(client: BrokerClient): void {
+    for (const [id, pendingRequest] of this.pending) {
+      if (pendingRequest.client === client) this.clearPendingRequest(id, pendingRequest)
+    }
+  }
+
+  private failAllPending(error: TabBridgeError): void {
+    for (const [id, pendingRequest] of this.pending) {
+      this.clearPendingRequest(id, pendingRequest)
+      this.sendJsonRpcError(pendingRequest.client, id, tabBridgeErrorToJsonRpc(error))
+    }
+  }
+
+  private sendJsonRpcError(client: BrokerClient, id: string, error: JsonRpcError): void {
+    client.socket.send(JSON.stringify(createJsonRpcError(id, error)))
   }
 
   close(): Promise<void> {
     return new Promise((resolve) => {
+      for (const [id, pendingRequest] of this.pending) {
+        this.clearPendingRequest(id, pendingRequest)
+      }
       this.wss.close(() => resolve())
       for (const client of this.clients) {
         client.socket.terminate()
       }
     })
+  }
+}
+
+
+function extensionNotConnectedError(): TabBridgeError {
+  return {
+    code: 'EXTENSION_NOT_CONNECTED',
+    message: 'The TabBridge extension is not connected.',
+    recoverable: true,
+    suggestedCommand: 'Open Chrome and click the TabBridge extension icon, then run tabbridge status --json.',
+  }
+}
+
+function requestTimeoutError(): TabBridgeError {
+  return {
+    code: 'BRIDGE_REQUEST_TIMEOUT',
+    message: 'The TabBridge extension did not respond before the broker request timed out.',
+    recoverable: true,
+    suggestedCommand: 'Retry the command. If it keeps timing out, open Chrome and restart the TabBridge extension.',
   }
 }

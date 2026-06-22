@@ -74,9 +74,8 @@ export function createBrokerClient(
         version: EXTENSION_VERSION,
         extensionId,
         capabilities: {
-          commands: ['status', 'tabs.list', 'tabs.current', 'tabs.requestAccess', 'snapshot'],
-          snapshot: ['semantic', 'text', 'html', 'screenshot'],
-          permissions: ['tabs', 'host-permission', 'activeTab', 'scripting', 'storage'],
+          commands: ['status', 'tabs.list', 'tabs.current'],
+          permissions: ['tabs', 'activeTab'],
         },
       }), socket)
     }
