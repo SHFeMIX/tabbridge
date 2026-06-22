@@ -127,6 +127,9 @@ importers:
       '@tabbridge/broker':
         specifier: workspace:*
         version: link:../broker
+      '@tabbridge/native-host':
+        specifier: workspace:*
+        version: link:../native-host
       '@tabbridge/shared':
         specifier: workspace:*
         version: link:../shared
