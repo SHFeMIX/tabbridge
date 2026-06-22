@@ -7,8 +7,12 @@ const mocks = vi.hoisted(() => ({
   listening: vi.fn(),
 }))
 
-vi.mock('@tabbridge/broker', () => ({
+vi.mock('@tabbridge/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tabbridge/shared')>()),
   BROKER_PORT: 9876,
+}))
+
+vi.mock('@tabbridge/broker', () => ({
   createRuntimePaths: (home?: string) => {
     const supportDir = path.join(home ?? os.tmpdir(), 'tabbridge-runtime')
     return {

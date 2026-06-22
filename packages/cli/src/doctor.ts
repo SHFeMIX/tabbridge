@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
-import { BROKER_PORT, createRuntimePaths } from '@tabbridge/broker'
-import { type BridgeDisconnectedState, type TabBridgeErrorCode } from '@tabbridge/shared'
+import { createRuntimePaths } from '@tabbridge/broker'
+import { BROKER_PORT, type BridgeDisconnectedState, type TabBridgeErrorCode } from '@tabbridge/shared'
 import { isBrokerListening } from './ensure-broker.js'
 
 export type DoctorCheck = {

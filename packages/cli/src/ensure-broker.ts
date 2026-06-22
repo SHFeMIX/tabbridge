@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { access } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
-import { BROKER_PORT, createRuntimePaths, generateToken, readToken, writeToken, type RuntimePaths } from '@tabbridge/broker'
+import { createRuntimePaths, generateToken, readToken, writeToken, type RuntimePaths } from '@tabbridge/broker'
+import { BROKER_PORT } from '@tabbridge/shared'
 
 export const DEFAULT_BROKER_URL = `ws://127.0.0.1:${BROKER_PORT}`
 

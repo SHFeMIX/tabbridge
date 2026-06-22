@@ -17,8 +17,12 @@ vi.mock('node:child_process', () => ({
   spawn: mocks.spawn,
 }))
 
-vi.mock('@tabbridge/broker', () => ({
+vi.mock('@tabbridge/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tabbridge/shared')>()),
   BROKER_PORT: 9876,
+}))
+
+vi.mock('@tabbridge/broker', () => ({
   createRuntimePaths: () => ({
     supportDir: '/tmp/tabbridge-test',
     tokenPath: '/tmp/tabbridge-test/broker-token',

@@ -1,12 +1,14 @@
-import { BROKER_PORT } from '@tabbridge/broker'
 import {
+  BROKER_PORT,
   PROTOCOL_VERSION,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  createJsonRpcError,
   createJsonRpcRequest,
 } from '@tabbridge/shared'
 
 const EXTENSION_VERSION = '0.1.0'
+const OPEN_READY_STATE = 1
 const DEFAULT_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000] as const
 
 export const DEFAULT_BROKER_URL = `ws://127.0.0.1:${BROKER_PORT}`
@@ -54,17 +56,19 @@ export function createBrokerClient(
     }, delay)
   }
 
-  const sendJson = (message: unknown) => {
-    ws?.send(JSON.stringify(message))
+  const sendJson = (message: unknown, socket = ws) => {
+    if (socket?.readyState !== OPEN_READY_STATE) return
+    socket.send(JSON.stringify(message))
   }
 
   const connect = () => {
     clearReconnect()
-    ws = new WS(url)
+    const socket = new WS(url)
+    ws = socket
 
-    ws.onopen = () => {
+    socket.onopen = () => {
       reconnectAttempt = 0
-      sendJson({ type: 'auth', role: 'extension' })
+      sendJson({ type: 'auth', role: 'extension' }, socket)
       sendJson(createJsonRpcRequest(`hello_${++messageId}`, 'broker.hello', {
         protocolVersion: PROTOCOL_VERSION,
         version: EXTENSION_VERSION,
@@ -74,28 +78,30 @@ export function createBrokerClient(
           snapshot: ['semantic', 'text', 'html', 'screenshot'],
           permissions: ['tabs', 'host-permission', 'activeTab', 'scripting', 'storage'],
         },
-      }))
+      }), socket)
     }
 
-    ws.onmessage = (event) => {
-      void handleMessage(event)
+    socket.onmessage = (event) => {
+      void handleMessage(event, socket)
     }
 
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (ws !== socket) return
+      ws = undefined
       if (stopped) return
       options.onDisconnect?.()
       scheduleReconnect()
     }
 
-    ws.onerror = () => {
-      ws?.close()
+    socket.onerror = () => {
+      socket.close()
     }
   }
 
-  async function handleMessage(event: MessageEvent): Promise<void> {
-    const text = typeof event.data === 'string' ? event.data : await event.data.text()
+  async function handleMessage(event: MessageEvent, socket: WebSocket): Promise<void> {
     let parsed: unknown
     try {
+      const text = typeof event.data === 'string' ? event.data : await event.data.text()
       parsed = JSON.parse(text)
     } catch {
       return
@@ -103,8 +109,15 @@ export function createBrokerClient(
 
     if (isAuthMessage(parsed) || !isJsonRpcRequest(parsed) || !options.onRequest) return
 
-    const response = await options.onRequest(parsed)
-    sendJson(response)
+    try {
+      const response = await options.onRequest(parsed)
+      sendJson(response, socket)
+    } catch (error) {
+      sendJson(createJsonRpcError(parsed.id, {
+        code: -32603,
+        message: error instanceof Error ? error.message : 'Internal error',
+      }), socket)
+    }
   }
 
   connect()

@@ -1,8 +1,10 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { BROKER_PORT } from '@tabbridge/shared'
 
-export const BROKER_PORT = 9876
+export { BROKER_PORT }
+
 
 export type RuntimePaths = {
   supportDir: string

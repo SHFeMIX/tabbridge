@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { okEnvelope, errorEnvelope } from '../src/index.js'
+import { BROKER_PORT, okEnvelope, errorEnvelope } from '../src/index.js'
 
 const protocolError = {
   code: 'TAB_NOT_FOUND',
@@ -8,6 +8,10 @@ const protocolError = {
 } as const
 
 describe('shared protocol envelopes', () => {
+  it('exports the browser-safe broker port constant', () => {
+    expect(BROKER_PORT).toBe(9876)
+  })
+
   it('creates CLI success envelopes with a stable ok/data shape', () => {
     expect(okEnvelope({ tabId: 123, snapshotId: 'snap_abc' })).toEqual({
       ok: true,

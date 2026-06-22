@@ -1,6 +1,7 @@
 import type { TabBridgeError } from './errors.js'
 
 export const PROTOCOL_VERSION = 1 as const
+export const BROKER_PORT = 9876 as const
 
 export type CliEnvelope<TData> =
   | { ok: true; data: TData }
