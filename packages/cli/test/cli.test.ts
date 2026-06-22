@@ -30,20 +30,26 @@ describe('CLI parser', () => {
     })
   })
 
-  it('parses status native host diagnostic target flags', () => {
-    expect(parseCli(['status', '--browser', 'chromium', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'])).toEqual({
+  it('parses status without native host diagnostic payload', () => {
+    expect(parseCli(['status', '--json'])).toEqual({
       command: 'status',
       json: true,
-      payload: { browser: 'chromium', extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
+      payload: {},
     })
   })
 
-  it('parses doctor native host diagnostic target flags', () => {
-    expect(parseCli(['doctor', '--browser', 'chrome', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'])).toEqual({
+  it('parses doctor without native host diagnostic payload', () => {
+    expect(parseCli(['doctor', '--json'])).toEqual({
       command: 'doctor',
       json: true,
-      payload: { browser: 'chrome', extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
+      payload: {},
     })
+  })
+
+  it('rejects removed native host commands', () => {
+    expect(() => parseCli(['native-host'])).toThrow('Unknown tabbridge command: native-host')
+    expect(() => parseCli(['install-native-host', '--browser', 'chrome', '--extension-id', 'ext'])).toThrow('Unknown tabbridge command: install-native-host --browser chrome --extension-id ext')
+    expect(() => parseCli(['uninstall-native-host', '--browser', 'chrome'])).toThrow('Unknown tabbridge command: uninstall-native-host --browser chrome')
   })
 
   it('rejects navigate because it is outside the MVP command set', () => {

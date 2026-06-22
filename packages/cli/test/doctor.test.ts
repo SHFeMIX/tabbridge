@@ -1,70 +1,67 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { evaluateDoctorReport, runDoctor } from '../src/doctor.js'
-import { createNativeManifest, nativeManifestPath } from '../src/native-manifest.js'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-describe('doctor report evaluation', () => {
-  it('reports missing manifest as native_host_missing', () => {
-    expect(evaluateDoctorReport({
-      manifestExists: false,
-      manifestValid: false,
-      manifestPathExecutable: false,
-      extensionIdExpected: true,
-      extensionIdMatches: false,
-      socketExists: false,
-      bridgeConnected: false,
-      protocolCompatible: false,
-      nodeMajor: 20,
-    })).toMatchObject({
-      ok: false,
-      bridgeState: 'native_host_missing',
-      checks: expect.arrayContaining([{ name: 'native host manifest exists', ok: false }]),
-    })
+const mocks = vi.hoisted(() => ({
+  listening: vi.fn(),
+}))
+
+vi.mock('@tabbridge/broker', () => ({
+  BROKER_PORT: 9876,
+  createRuntimePaths: (home?: string) => {
+    const supportDir = path.join(home ?? os.tmpdir(), 'tabbridge-runtime')
+    return {
+      supportDir,
+      tokenPath: path.join(supportDir, 'broker-token'),
+      lockPath: path.join(supportDir, 'broker.lock'),
+    }
+  },
+}))
+
+vi.mock('../src/ensure-broker.js', () => ({
+  isBrokerListening: mocks.listening,
+}))
+
+const { runDoctor } = await import('../src/doctor.js')
+
+describe('broker-backed doctor', () => {
+  beforeEach(() => {
+    mocks.listening.mockReset()
   })
 
-  it('reports extension id mismatch distinctly', () => {
-    expect(evaluateDoctorReport({
-      manifestExists: true,
-      manifestValid: true,
-      manifestPathExecutable: true,
-      extensionIdExpected: true,
-      extensionIdMatches: false,
-      socketExists: true,
-      bridgeConnected: true,
-      protocolCompatible: true,
-      nodeMajor: 20,
-    })).toMatchObject({
-      ok: false,
-      bridgeState: 'connected',
-      errorCode: 'EXTENSION_ID_MISMATCH',
-    })
-  })
-
-  it('reports missing expected extension id instead of green extension comparison', async () => {
+  it('reports extension asleep when the broker is not listening', async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), 'tabbridge-doctor-'))
-    const manifestPath = nativeManifestPath('chrome', home)
-    const wrapperPath = path.join(home, 'wrapper')
-    await fs.mkdir(path.dirname(manifestPath), { recursive: true })
-    await fs.writeFile(wrapperPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
-    await fs.writeFile(manifestPath, `${JSON.stringify(createNativeManifest({
-      extensionId: 'abcdefghijklmnopabcdefghijklmnop',
-      wrapperPath,
-    }))}\n`)
+    mocks.listening.mockResolvedValue(false)
 
-    const report = await runDoctor({ browser: 'chrome', home })
+    const report = await runDoctor({ home })
 
     expect(report).toMatchObject({
       ok: false,
-      errorCode: 'EXTENSION_ID_MISMATCH',
+      bridgeState: 'extension_asleep',
+      errorCode: 'EXTENSION_NOT_CONNECTED',
+      checks: expect.arrayContaining([{ name: 'broker is listening on port 9876', ok: false }]),
+    })
+  })
+
+  it('checks broker token mode and lock file when broker is listening', async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'tabbridge-doctor-'))
+    const supportDir = path.join(home, 'tabbridge-runtime')
+    await fs.mkdir(supportDir, { recursive: true })
+    await fs.writeFile(path.join(supportDir, 'broker-token'), 'tok', { mode: 0o600 })
+    await fs.writeFile(path.join(supportDir, 'broker.lock'), '{}')
+    mocks.listening.mockResolvedValue(true)
+
+    const report = await runDoctor({ home })
+
+    expect(report).toMatchObject({
+      ok: true,
+      bridgeState: 'connected',
       checks: expect.arrayContaining([
-        {
-          name: 'expected extension id was provided',
-          ok: false,
-          detail: 'Pass --extension-id to validate native manifest allowed_origins.',
-        },
-        { name: 'extension id matches allowed_origins', ok: false },
+        { name: 'broker is listening on port 9876', ok: true },
+        { name: 'broker token file exists', ok: true },
+        { name: 'broker token file mode is 0600', ok: true },
+        { name: 'broker lock file exists', ok: true },
       ]),
     })
   })

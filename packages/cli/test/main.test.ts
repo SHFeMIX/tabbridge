@@ -1,5 +1,7 @@
 import { Readable, Writable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
+import type { JsonRpcRequest } from '@tabbridge/shared'
+import type { BrokerClientOptions } from '../src/broker-client.js'
 import { run, type RunOptions } from '../src/main.js'
 
 function stringReadable(text: string): Readable {
@@ -20,146 +22,64 @@ function captureWritable(): { writable: Writable; chunks: string[] } {
 }
 
 describe('CLI main runner', () => {
-  it('reads --text-stdin before sending and replaces the marker with stdin text', async () => {
+  it('ensures the broker then sends stdin-hydrated JSON-RPC requests', async () => {
     const stdout = captureWritable()
     const stderr = captureWritable()
-    const sentPayloads: unknown[] = []
+    const sentRequests: unknown[] = []
+    const sentOptions: unknown[] = []
     const options: RunOptions = {
       argv: ['type', '--tab', '123', '--snapshot-id', 'snap_1', '--ref', '@e1', '--text-stdin', '--json'],
       stdin: stringReadable('hello from stdin'),
       stdout: stdout.writable,
       stderr: stderr.writable,
-      now: () => 1782012345000,
       requestId: () => 'req_stdin',
-      sendBridgeRequest: async (request) => {
-        sentPayloads.push(request.payload)
-        return { ok: true, data: { typed: true } }
+      ensureBroker: async () => ({ url: 'ws://127.0.0.1:9876', token: 'tok' }),
+      sendBrokerRequest: async <TData>(request: JsonRpcRequest, brokerOptions: BrokerClientOptions) => {
+        sentRequests.push(request)
+        sentOptions.push(brokerOptions)
+        return { ok: true, data: { typed: true } as TData }
       },
     }
 
     const exitCode = await run(options)
 
     expect(exitCode).toBe(0)
-    expect(sentPayloads).toEqual([{ tabId: 123, snapshotId: 'snap_1', ref: '@e1', text: 'hello from stdin' }])
+    expect(sentRequests).toEqual([{
+      jsonrpc: '2.0',
+      id: 'req_stdin',
+      method: 'action.type',
+      params: { tabId: 123, snapshotId: 'snap_1', ref: '@e1', text: 'hello from stdin' },
+    }])
+    expect(sentOptions).toEqual([{ url: 'ws://127.0.0.1:9876', token: 'tok', timeoutMs: 30000 }])
     expect(stdout.chunks).toEqual(['{"ok":true,"data":{"typed":true}}\n'])
     expect(stderr.chunks).toEqual([])
   })
 
-  it('handles install-native-host locally as one JSON envelope', async () => {
+  it('routes status through the broker instead of local native-host diagnostics', async () => {
     const stdout = captureWritable()
     const stderr = captureWritable()
-    const writes: unknown[] = []
-
-    const exitCode = await run({
-      argv: ['install-native-host', '--browser', 'chrome', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'],
-      stdout: stdout.writable,
-      stderr: stderr.writable,
-      writeNativeManifest: async (input) => {
-        writes.push(input)
-        return {
-          path: '/Users/alice/manifest.json',
-          manifest: {
-            name: 'com.tabbridge.host',
-            description: 'TabBridge native host',
-            path: '/Users/alice/bin/tabbridge-native-host-wrapper',
-            type: 'stdio',
-            allowed_origins: ['chrome-extension://abcdefghijklmnopabcdefghijklmnop/'],
-          },
-        }
-      },
-    })
-
-    expect(exitCode).toBe(0)
-    expect(writes).toEqual([{ browser: 'chrome', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }])
-    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"path":"/Users/alice/manifest.json","manifest":{"name":"com.tabbridge.host","description":"TabBridge native host","path":"/Users/alice/bin/tabbridge-native-host-wrapper","type":"stdio","allowed_origins":["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]}}}\n'])
-    expect(stderr.chunks).toEqual([])
-  })
-
-  it('handles doctor locally with the default Chrome manifest target', async () => {
-    const stdout = captureWritable()
-    const stderr = captureWritable()
-    const doctorInputs: unknown[] = []
-
-    const exitCode = await run({
-      argv: ['doctor', '--json'],
-      stdout: stdout.writable,
-      stderr: stderr.writable,
-      runDoctor: async (input) => {
-        doctorInputs.push(input)
-        return { ok: true, bridgeState: 'connected', checks: [] }
-      },
-    })
-
-    expect(exitCode).toBe(0)
-    expect(doctorInputs).toEqual([{ browser: 'chrome' }])
-    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":true,"bridgeState":"connected","checks":[]}}\n'])
-    expect(stderr.chunks).toEqual([])
-  })
-
-  it('handles status locally with the default Chrome manifest target', async () => {
-    const stdout = captureWritable()
-    const stderr = captureWritable()
-    const doctorInputs: unknown[] = []
+    const sentRequests: unknown[] = []
 
     const exitCode = await run({
       argv: ['status', '--json'],
       stdout: stdout.writable,
       stderr: stderr.writable,
-      runDoctor: async (input) => {
-        doctorInputs.push(input)
-        return { ok: false, bridgeState: 'extension_asleep', errorCode: 'EXTENSION_NOT_CONNECTED', checks: [] }
+      requestId: () => 'req_status',
+      ensureBroker: async () => ({ url: 'ws://127.0.0.1:9876', token: 'tok' }),
+      sendBrokerRequest: async <TData>(request: JsonRpcRequest) => {
+        sentRequests.push(request)
+        return { ok: true, data: { bridgeState: 'connected' } as TData }
       },
+      runDoctor: async () => { throw new Error('status should not run local doctor') },
     })
 
     expect(exitCode).toBe(0)
-    expect(doctorInputs).toEqual([{ browser: 'chrome' }])
-    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":false,"bridgeState":"extension_asleep","errorCode":"EXTENSION_NOT_CONNECTED","checks":[]}}\n'])
+    expect(sentRequests).toEqual([{ jsonrpc: '2.0', id: 'req_status', method: 'status', params: {} }])
+    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"bridgeState":"connected"}}\n'])
     expect(stderr.chunks).toEqual([])
   })
 
-  it('passes status browser and extension id flags to diagnostics', async () => {
-    const stdout = captureWritable()
-    const stderr = captureWritable()
-    const doctorInputs: unknown[] = []
-
-    const exitCode = await run({
-      argv: ['status', '--browser', 'chromium', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'],
-      stdout: stdout.writable,
-      stderr: stderr.writable,
-      runDoctor: async (input) => {
-        doctorInputs.push(input)
-        return { ok: true, bridgeState: 'connected', checks: [] }
-      },
-    })
-
-    expect(exitCode).toBe(0)
-    expect(doctorInputs).toEqual([{ browser: 'chromium', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }])
-    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":true,"bridgeState":"connected","checks":[]}}\n'])
-    expect(stderr.chunks).toEqual([])
-  })
-
-  it('passes doctor browser and extension id flags to diagnostics', async () => {
-    const stdout = captureWritable()
-    const stderr = captureWritable()
-    const doctorInputs: unknown[] = []
-
-    const exitCode = await run({
-      argv: ['doctor', '--browser', 'chromium', '--extension-id', 'abcdefghijklmnopabcdefghijklmnop', '--json'],
-      stdout: stdout.writable,
-      stderr: stderr.writable,
-      runDoctor: async (input) => {
-        doctorInputs.push(input)
-        return { ok: true, bridgeState: 'connected', checks: [] }
-      },
-    })
-
-    expect(exitCode).toBe(0)
-    expect(doctorInputs).toEqual([{ browser: 'chromium', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }])
-    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":true,"bridgeState":"connected","checks":[]}}\n'])
-    expect(stderr.chunks).toEqual([])
-  })
-
-  it('returns a failing exit code for unhealthy doctor reports', async () => {
+  it('handles doctor locally and returns a failing exit code for unhealthy reports', async () => {
     const stdout = captureWritable()
     const stderr = captureWritable()
 
@@ -167,11 +87,12 @@ describe('CLI main runner', () => {
       argv: ['doctor', '--json'],
       stdout: stdout.writable,
       stderr: stderr.writable,
-      runDoctor: async () => ({ ok: false, bridgeState: 'native_host_missing', errorCode: 'NATIVE_HOST_NOT_CONNECTED', checks: [] }),
+      ensureBroker: async () => { throw new Error('doctor should not ensure broker') },
+      runDoctor: async () => ({ ok: false, bridgeState: 'extension_asleep', errorCode: 'EXTENSION_NOT_CONNECTED', checks: [] }),
     })
 
     expect(exitCode).toBe(1)
-    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":false,"bridgeState":"native_host_missing","errorCode":"NATIVE_HOST_NOT_CONNECTED","checks":[]}}\n'])
+    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"ok":false,"bridgeState":"extension_asleep","errorCode":"EXTENSION_NOT_CONNECTED","checks":[]}}\n'])
     expect(stderr.chunks).toEqual([])
   })
 })

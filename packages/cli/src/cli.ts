@@ -38,15 +38,6 @@ function requireStringFlag(argv: string[], flag: string, command: string): strin
   return value
 }
 
-function diagnosticPayload(argv: string[]): Record<string, unknown> {
-  const payload: Record<string, unknown> = {}
-  const browser = readFlag(argv, '--browser')
-  const extensionId = readFlag(argv, '--extension-id')
-  if (browser !== undefined) payload.browser = browser
-  if (extensionId !== undefined) payload.extensionId = extensionId
-  return payload
-}
-
 export function parseCli(argv: string[]): ParsedCli {
   const json = hasFlag(argv, '--json')
   const [first, second] = argv
@@ -55,28 +46,8 @@ export function parseCli(argv: string[]): ParsedCli {
     throw new Error('navigate is not part of the TabBridge MVP command set')
   }
 
-  if (first === 'status') return { command: 'status', json, payload: diagnosticPayload(argv) }
-  if (first === 'doctor') return { command: 'doctor', json, payload: diagnosticPayload(argv) }
-  if (first === 'native-host') return { command: 'nativeHost', json, payload: {} }
-
-  if (first === 'install-native-host') {
-    return {
-      command: 'installNativeHost',
-      json,
-      payload: {
-        browser: requireStringFlag(argv, '--browser', 'install-native-host'),
-        extensionId: requireStringFlag(argv, '--extension-id', 'install-native-host'),
-      },
-    }
-  }
-
-  if (first === 'uninstall-native-host') {
-    return {
-      command: 'uninstallNativeHost',
-      json,
-      payload: { browser: requireStringFlag(argv, '--browser', 'uninstall-native-host') },
-    }
-  }
+  if (first === 'status') return { command: 'status', json, payload: {} }
+  if (first === 'doctor') return { command: 'doctor', json, payload: {} }
 
   if (first === 'tabs' && second === 'list') return { command: 'tabs.list', json, payload: {} }
   if (first === 'tabs' && second === 'current') return { command: 'tabs.current', json, payload: {} }

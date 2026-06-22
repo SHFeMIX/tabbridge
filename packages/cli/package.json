@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@tabbridge/broker": "workspace:*",
-    "@tabbridge/native-host": "workspace:*",
     "@tabbridge/shared": "workspace:*",
     "ws": "^8.18.0"
   },
