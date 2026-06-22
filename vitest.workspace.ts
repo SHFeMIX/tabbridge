@@ -3,6 +3,7 @@ import { defineWorkspace } from 'vitest/config'
 
 const packageProjects = [
   'packages/shared',
+  'packages/broker',
   'packages/cli',
   'packages/native-host',
   'packages/chrome-extension',
