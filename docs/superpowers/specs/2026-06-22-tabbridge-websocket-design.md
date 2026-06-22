@@ -53,7 +53,7 @@ Agent / Claude Code
 
 - `main.ts`：`tabbridge broker` 入口，负责文件锁、启动 WebSocket server、写入 `broker.json`、持有运行循环。
 - `lock.ts`：通过 `flock` 保证同一用户只有一个 broker 实例。
-- `runtime.ts`：生成/读写 `broker.json`，生成 session token，设置目录/文件权限。
+- `runtime.ts`：生成/读写 `broker-token`，生成 session token，设置目录/文件权限。
 - `server.ts`：WebSocket server，处理连接、认证、JSON-RPC 路由。
 - `bridge.ts`：保留自原 native-host：请求关联、扩展 hello 状态机、per-tab action queue、超时处理。
 - `jsonrpc.ts`：JSON-RPC request/response 解析、错误码映射。
@@ -61,7 +61,7 @@ Agent / Claude Code
 ### `packages/cli`
 
 - `broker-client.ts`：WebSocket client，负责连接、认证、发送 JSON-RPC request、接收 response。
-- `ensure-broker.ts`：检查 `broker.json`；若 broker 未运行则 `spawn` detached `tabbridge broker`，等待就绪。
+- `ensure-broker.ts`：检查 broker 是否在运行（通过 lock 文件 / pid / WebSocket 可连接性）；若未运行则 `spawn` detached `tabbridge broker`，等待就绪。
 - `main.ts`：命令路由。bridge 命令和 `status`/`doctor` 都会先 `ensureBroker()`，再通过 broker-client 发送 JSON-RPC 请求或查询状态。
 - `doctor.ts`：改为检查 broker 进程、端口文件、WebSocket 可连接性、token 文件权限。
 - 删除 `ipc-client.ts`、`native-manifest.ts`、native-host wrapper 相关逻辑。
@@ -88,27 +88,36 @@ Agent / Claude Code
 
 ```text
 ~/Library/Application Support/tabbridge/
-  broker.json        # { port, token, pid, startedAt }
+  broker-token       # CLI 认证 token
   broker.lock        # flock 文件锁
 ```
 
 - 目录权限 `0700`。
-- `broker.json`、`broker.lock` 权限 `0600`。
-- broker 启动时生成随机 token；每次启动都轮换。token 只存在于 `broker.json` 中。
+- `broker-token`、`broker.lock` 权限 `0600`。
+- broker 启动时生成随机 token；每次启动都轮换，写入 `broker-token`。
+- **端口固定为 `9876`**，扩展无法读取本地文件，因此不使用动态端口文件。
 
 ## 连接与认证
 
-1. 扩展或 CLI 读取 `broker.json`，拿到 `ws://127.0.0.1:<port>` 和 `token`。
-2. 连接建立后，客户端必须在 5 秒内发送首条消息：
-   ```json
-   { "type": "auth", "token": "<token>" }
-   ```
-3. broker 校验 token，失败则断开连接。
+1. 扩展和 CLI 都连接到固定地址 `ws://127.0.0.1:9876`。
+2. 连接建立后，客户端必须在 5 秒内发送首条消息。
+   - CLI 发送：
+     ```json
+     { "type": "auth", "token": "<broker-token>" }
+     ```
+   - 扩展发送：
+     ```json
+     { "type": "auth", "role": "extension" }
+     ```
+     broker 通过 WebSocket handshake 的 `Origin` 头确认来源为 `chrome-extension://` 后允许连接。
+3. broker 校验失败则断开连接。
 4. 扩展在 auth 后发送 JSON-RPC `broker.hello`：
    ```json
    { "jsonrpc": "2.0", "id": "h1", "method": "broker.hello", "params": { "protocolVersion": 1, "version": "0.1.0", "extensionId": "...", "capabilities": {...} } }
    ```
 5. CLI 不需要发送 hello，直接发送业务请求。
+
+> MVP 取舍：扩展不强制校验 secret token，因为 MV3 扩展无法读取本地文件获取动态 token。后续若要增强，可把 token 编译进扩展或提供配置入口。
 
 ## JSON-RPC 协议
 
