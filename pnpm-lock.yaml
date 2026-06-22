@@ -124,16 +124,22 @@ importers:
 
   packages/cli:
     dependencies:
-      '@tabbridge/native-host':
+      '@tabbridge/broker':
         specifier: workspace:*
-        version: link:../native-host
+        version: link:../broker
       '@tabbridge/shared':
         specifier: workspace:*
         version: link:../shared
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 20.19.43
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
       tsup:
         specifier: 'catalog:'
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(typescript@5.9.3)
