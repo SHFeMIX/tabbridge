@@ -1,12 +1,9 @@
 import { defineBackground } from 'wxt/utils/define-background'
-import { createNativePortManager } from '../background/native-port'
-import { routeBridgeCommand } from '../background/commands'
+import { createBrokerClient, DEFAULT_BROKER_URL } from '../background/broker-client'
+import { routeJsonRpcRequest } from '../background/jsonrpc-router'
 
 export default defineBackground(() => {
-  const manager = createNativePortManager(chrome.runtime, {
-    extensionId: chrome.runtime.id,
-    onMessage: routeBridgeCommand,
+  createBrokerClient(DEFAULT_BROKER_URL, chrome.runtime.id, {
+    onRequest: routeJsonRpcRequest,
   })
-
-  manager.connect()
 })

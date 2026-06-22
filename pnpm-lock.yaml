@@ -84,6 +84,9 @@ importers:
 
   packages/chrome-extension:
     dependencies:
+      '@tabbridge/broker':
+        specifier: workspace:*
+        version: link:../broker
       '@tabbridge/shared':
         specifier: workspace:*
         version: link:../shared

@@ -12,6 +12,7 @@
     "clean": "rm -rf .output .wxt dist"
   },
   "dependencies": {
+    "@tabbridge/broker": "workspace:*",
     "@tabbridge/shared": "workspace:*",
     "vue": "catalog:"
   },

@@ -5,7 +5,7 @@ export default defineConfig({
   srcDir: 'src',
   manifest: {
     name: 'TabBridge',
-    permissions: ['nativeMessaging', 'tabs', 'scripting', 'storage', 'activeTab'],
+    permissions: ['tabs', 'scripting', 'storage', 'activeTab'],
     optional_host_permissions: ['http://*/*', 'https://*/*'],
     minimum_chrome_version: '105',
   },

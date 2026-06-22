@@ -14,10 +14,10 @@ const chromeBuildEnv = {
 } satisfies ConfigEnv
 
 describe('WXT manifest config', () => {
-  it('declares exact MVP permissions and optional host permissions', () => {
+  it('declares MVP permissions without nativeMessaging', () => {
     expect(config.manifest).toMatchObject({
       name: 'TabBridge',
-      permissions: ['nativeMessaging', 'tabs', 'scripting', 'storage', 'activeTab'],
+      permissions: ['tabs', 'scripting', 'storage', 'activeTab'],
       optional_host_permissions: ['http://*/*', 'https://*/*'],
     })
   })
