@@ -7,7 +7,7 @@
     "tabbridge": "dist/main.js"
   },
   "scripts": {
-    "build": "tsup src/main.ts --format esm --dts --clean --banner.js '#!/usr/bin/env node'",
+    "build": "tsup src/main.ts --format esm --dts --clean && node -e 'const fs = require(\"node:fs\"); const path = \"dist/main.js\"; let text = fs.readFileSync(path, \"utf8\"); if (!text.startsWith(\"#!\")) fs.writeFileSync(path, \"#!/usr/bin/env node\\\\n\" + text); fs.chmodSync(path, 0o755);'",
     "test": "vitest --run",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
