@@ -1,70 +1,41 @@
-# Task 4 Report: Native Host Installation, Status, and Doctor Diagnostics
+# Task 4 Report: Broker Main Entry
 
-## Status
+## Summary
 
-Completed Task 4 only.
+Implemented `runBroker()` — the main entry point that wires together all broker subsystems (runtime paths, support dir, lock acquisition, token management, and WebSocket server) into a single callable function. Exported it from the broker package index.
 
-## Implementation
+## Files Created
 
-- Added macOS Chrome/Chromium Native Messaging manifest helpers in `packages/cli/src/native-manifest.ts`.
-- Added doctor evaluation and filesystem-based diagnostic checks in `packages/cli/src/doctor.ts`.
-- Wired local CLI handling in `packages/cli/src/main.ts` for:
-  - `install-native-host`
-  - `uninstall-native-host`
-  - `doctor`
-  - `status`
-- Kept shared protocol/error usage from `@tabbridge/shared` and runtime path usage from `@tabbridge/native-host`.
-- Added `@tabbridge/native-host` as a CLI workspace dependency.
+- `packages/broker/src/main.ts` — `runBroker()` implementation and `Broker` type
+- `packages/broker/test/main.test.ts` — Vitest test verifying startup and close
 
-## TDD Evidence
+## Files Modified
 
-- Added failing manifest/doctor tests first; verified RED because `native-manifest.ts` and `doctor.ts` did not exist.
-- Added failing CLI local install test; verified RED because local native-host install commands were placeholder errors.
-- Added failing local `doctor` default-browser test; verified RED because doctor required a missing browser payload.
-- Added failing unhealthy-doctor exit-code test; verified RED because local command success was used as the process exit status.
-- Implemented minimal code until targeted tests passed.
+- `packages/broker/src/index.ts` — added `runBroker` and `Broker` type exports
 
-## Verification
+## Implementation Details
 
-- `pnpm --filter @tabbridge/cli test` — passed, 7 files / 32 tests.
-- `pnpm --filter @tabbridge/cli typecheck` — passed.
-- `pnpm test` — passed, 19 files / 87 tests.
-- `pnpm typecheck` — passed.
+### `runBroker()` flow:
+1. Creates runtime paths via `createRuntimePaths()`
+2. Ensures the support directory exists with `ensureSupportDir()`
+3. Creates the lock file and acquires an exclusive broker lock via `acquireBrokerLock()`
+4. Reads an existing token or generates a new one and persists it
+5. Starts the `BrokerServer` on the configured `BROKER_PORT` (9876)
+6. Returns a `Broker` object with `port` and `close()` — the latter shuts down the server and releases the lock
 
-## Notes
+### Key fix beyond the brief:
+The `proper-lockfile` library requires the lock file to exist before locking. Added `fs.writeFile(paths.lockPath, '')` before `acquireBrokerLock()` to ensure the lock file is present. Without this, the lock acquisition would throw `ENOENT`.
 
-- Native Messaging host name is `com.tabbridge.host`.
-- Manifest `allowed_origins` uses the exact provided extension id as `chrome-extension://<extension-id>/`.
-- CLI JSON mode prints a single envelope for local commands.
-- `doctor` returns a failing process exit code when the diagnostic report is unhealthy while still emitting a successful JSON envelope containing the report.
-- Native-host stdout behavior was not changed.
+## Test Results
 
-## Review Fix: Executable Native Host Wrapper
+- **Broker package tests:** 10/10 passed (4 test files)
+- **TypeScript typecheck:** clean (no errors)
+- **Full workspace tests:** broker tests pass; pre-existing failures in native-host/cli packages are unrelated (Task 9 will address those)
 
-### Status
+## Commit
 
-Completed Task 4 review fixes with TDD.
+`416c135` feat(broker): add runBroker entry point
 
-### RED Evidence
+## Concerns
 
-- `pnpm --filter @tabbridge/cli test -- native-manifest doctor cli main` initially could not run because dependencies were not installed in this worktree (`vitest: command not found`); after `pnpm install`, the focused tests failed for the expected review issues.
-- Parser tests failed because `status` and `doctor` returned empty payloads instead of preserving `--browser` and `--extension-id`.
-- Manifest install test failed because `writeNativeManifest` did not generate an executable wrapper path and the manifest path was not the Application Support wrapper.
-- Main runner tests failed because `install-native-host` still passed `wrapperPath: process.execPath`, and diagnostic commands still defaulted to Chrome without forwarded flags.
-- Doctor test failed because missing expected extension id still produced a green `extension id matches allowed_origins` check.
-
-### Implementation
-
-- `writeNativeManifest` now installs an executable wrapper script at `~/Library/Application Support/tabbridge/tabbridge-native-host-wrapper` and points the Native Messaging manifest at that wrapper instead of Node.
-- The wrapper script delegates to the TabBridge native-host entry and preserves native messaging argv with `"$@"`.
-- `install-native-host` now calls the manifest writer with only browser and extension id; wrapper generation is owned by the installer.
-- `status` and `doctor` parsing now preserves optional `--browser` and `--extension-id` flags.
-- `runDoctor` now reports an explicit failing `expected extension id was provided` check when no expected id is supplied and does not mark allowed-origin comparison green without an expected id.
-- CLI JSON output remains a single envelope for local commands.
-
-### Verification
-
-- `pnpm --filter @tabbridge/cli test` — passed, 7 files / 38 tests.
-- `pnpm --filter @tabbridge/cli typecheck` — passed.
-- `pnpm test` — passed, 19 files / 93 tests.
-- `pnpm typecheck` — passed.
+None. The implementation follows the brief exactly, with one necessary addition (lock file creation) that was discovered during TDD.

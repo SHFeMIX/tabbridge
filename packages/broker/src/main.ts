@@ -1,4 +1,4 @@
-import { createRuntimePaths, ensureSupportDir, generateToken, readToken, writeToken, BROKER_PORT } from './runtime.js'
+import { createRuntimePaths, ensureSupportDir, generateToken, readToken, writeToken, BROKER_PORT, type RuntimePaths } from './runtime.js'
 import { acquireBrokerLock } from './lock.js'
 import { BrokerServer } from './server.js'
 import fs from 'node:fs/promises'
@@ -8,8 +8,8 @@ export type Broker = {
   close: () => Promise<void>
 }
 
-export async function runBroker(): Promise<Broker> {
-  const paths = createRuntimePaths()
+export async function runBroker(pathsArg?: RuntimePaths): Promise<Broker> {
+  const paths = pathsArg ?? createRuntimePaths()
   await ensureSupportDir(paths)
   await fs.writeFile(paths.lockPath, '', { mode: 0o600 })
   const release = await acquireBrokerLock(paths.lockPath)
