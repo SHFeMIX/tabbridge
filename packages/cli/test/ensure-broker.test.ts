@@ -95,6 +95,40 @@ describe('ensure-broker helpers', () => {
     )
   })
 
+  it('uses an import eval fallback when the built broker entry is missing', async () => {
+    const originalArgv = [...process.argv]
+    const cliEntrypoint = '/repo/packages/cli/dist/index.js'
+    process.argv[1] = cliEntrypoint
+    mocks.listeningResults = [false, true]
+    mocks.readToken.mockResolvedValue('existing-token')
+
+    try {
+      const result = await ensureBroker({
+        brokerEntryExists: async () => false,
+        waitTimeoutMs: 50,
+        waitIntervalMs: 1,
+      })
+
+      expect(result.token).toBe('existing-token')
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          expect.stringContaining("import('@tabbridge/broker')"),
+        ],
+        { detached: true, stdio: 'ignore' },
+      )
+      expect(mocks.spawn).not.toHaveBeenCalledWith(
+        process.execPath,
+        [cliEntrypoint, 'broker'],
+        expect.anything(),
+      )
+    } finally {
+      process.argv.splice(0, process.argv.length, ...originalArgv)
+    }
+  })
+
   it('reports a clear error when a broker is listening but the token file is missing', async () => {
     mocks.listeningResults = [true]
     mocks.readToken.mockResolvedValue(undefined)

@@ -60,18 +60,10 @@ function brokerEntryPath(): string {
   return fileURLToPath(new URL('../../broker/dist/main.js', import.meta.url))
 }
 
-function isCliEntrypointUsable(argv1: string | undefined): argv1 is string {
-  return Boolean(argv1 && !argv1.includes('/node_modules/'))
-}
-
 async function brokerStartArgs(brokerEntryExists: (path: string) => Promise<boolean>): Promise<string[]> {
   const entryPath = brokerEntryPath()
   if (await brokerEntryExists(entryPath)) {
     return [entryPath]
-  }
-
-  if (isCliEntrypointUsable(process.argv[1])) {
-    return [process.argv[1], 'broker']
   }
 
   return [
