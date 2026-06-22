@@ -6,6 +6,8 @@ import path from 'node:path'
 import os from 'node:os'
 import { WebSocket } from 'ws'
 
+import packageJson from '../package.json' with { type: 'json' }
+
 async function createTempPaths() {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tabbridge-broker-test-'))
   return createRuntimePaths(tmpDir)
@@ -75,5 +77,13 @@ describe('runBroker', () => {
 
     ws.close()
     await broker2.close()
+  })
+})
+
+describe('broker package executable entry', () => {
+  it('declares a tabbridge-broker bin that is built from src/main.ts', () => {
+    expect(packageJson.bin).toEqual({ 'tabbridge-broker': 'dist/main.js' })
+    expect(packageJson.scripts.build).toContain('src/index.ts')
+    expect(packageJson.scripts.build).toContain('src/main.ts')
   })
 })

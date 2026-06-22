@@ -62,15 +62,11 @@ function brokerEntryPath(): string {
 
 async function brokerStartArgs(brokerEntryExists: (path: string) => Promise<boolean>): Promise<string[]> {
   const entryPath = brokerEntryPath()
-  if (await brokerEntryExists(entryPath)) {
-    return [entryPath]
+  if (!(await brokerEntryExists(entryPath))) {
+    throw new Error(`BROKER_ENTRY_MISSING: expected built broker entry at ${entryPath}; run pnpm --filter @tabbridge/broker build`)
   }
 
-  return [
-    '--input-type=module',
-    '--eval',
-    "import('@tabbridge/broker').then(async ({ runBroker }) => { await runBroker(); }).catch((error) => { console.error(error); process.exit(1); });",
-  ]
+  return [entryPath]
 }
 
 export async function ensureBroker(options: EnsureBrokerOptions = {}): Promise<{ url: string; token: string }> {
