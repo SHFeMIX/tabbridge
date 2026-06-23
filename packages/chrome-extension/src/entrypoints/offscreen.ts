@@ -1,5 +1,5 @@
 import { createBrokerClient, DEFAULT_BROKER_URL } from '../offscreen/broker-client'
-import type { JsonRpcRequest, JsonRpcResponse } from '@tabbridge/shared'
+import type { JsonRpcResponse } from '@tabbridge/shared'
 
 const extensionId = chrome.runtime.id
 
@@ -12,7 +12,8 @@ const client = createBrokerClient(DEFAULT_BROKER_URL, extensionId, {
   },
 })
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return false
   if (message?.type === 'broker.response' && message.response) {
     client.send(message.response as JsonRpcResponse)
     sendResponse({ ok: true })

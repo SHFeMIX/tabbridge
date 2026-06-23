@@ -70,4 +70,35 @@ describe('offscreen broker client', () => {
 
     expect(onRequest).toHaveBeenCalledWith(request)
   })
+
+  it('sends broker.disconnected via onDisconnect callback when WebSocket closes', async () => {
+    type FakeSocket = {
+      send: ReturnType<typeof vi.fn>
+      close: ReturnType<typeof vi.fn>
+      readyState: number
+      onclose?: () => void
+    }
+    const sockets: FakeSocket[] = []
+    const WebSocket = vi.fn().mockImplementation(() => {
+      const socket: FakeSocket = { send: vi.fn(), close: vi.fn(), readyState: 1 }
+      let closeHandler: (() => void) | undefined
+      Object.defineProperty(socket, 'onclose', {
+        get() { return closeHandler },
+        set(fn: () => void) { closeHandler = fn },
+      })
+      sockets.push(socket)
+      return socket
+    })
+    const onDisconnect = vi.fn()
+
+    createBrokerClient('ws://127.0.0.1:9876', 'extid', {
+      WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+      onDisconnect,
+    })
+
+    // Trigger the WebSocket close event
+    sockets[0]!.onclose?.()
+
+    expect(onDisconnect).toHaveBeenCalled()
+  })
 })
