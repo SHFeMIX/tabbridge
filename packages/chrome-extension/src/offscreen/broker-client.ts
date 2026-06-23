@@ -3,34 +3,32 @@ import {
   PROTOCOL_VERSION,
   type JsonRpcRequest,
   type JsonRpcResponse,
-  createJsonRpcError,
   createJsonRpcRequest,
 } from '@tabbridge/shared'
 
+export const DEFAULT_BROKER_URL = `ws://127.0.0.1:${BROKER_PORT}`
 const EXTENSION_VERSION = '0.1.0'
 const OPEN_READY_STATE = 1
 const DEFAULT_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000] as const
 
-export const DEFAULT_BROKER_URL = `ws://127.0.0.1:${BROKER_PORT}`
-
-export type BrokerClientOptions = {
+export type OffscreenBrokerClientOptions = {
   WebSocket?: typeof globalThis.WebSocket
   reconnectDelaysMs?: readonly number[]
   timer?: Pick<typeof globalThis, 'setTimeout' | 'clearTimeout'>
-  onRequest?: (request: JsonRpcRequest) => Promise<JsonRpcResponse> | JsonRpcResponse
+  onRequest?: (request: JsonRpcRequest) => void
   onDisconnect?: () => void
 }
 
-export type BrokerClient = {
-  send(response: JsonRpcResponse): void
+export type OffscreenBrokerClient = {
+  send(message: JsonRpcRequest | JsonRpcResponse): void
   close(): void
 }
 
 export function createBrokerClient(
   url: string,
   extensionId: string,
-  options: BrokerClientOptions = {},
-): BrokerClient {
+  options: OffscreenBrokerClientOptions = {},
+): OffscreenBrokerClient {
   const WS = options.WebSocket ?? globalThis.WebSocket
   const timer = options.timer ?? globalThis
   const reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS
@@ -74,14 +72,15 @@ export function createBrokerClient(
         version: EXTENSION_VERSION,
         extensionId,
         capabilities: {
-          commands: ['status', 'tabs.list', 'tabs.current'],
-          permissions: ['tabs', 'activeTab'],
+          commands: ['status', 'tabs.list', 'tabs.current', 'tabs.requestAccess', 'snapshot'],
+          snapshot: ['semantic', 'text', 'html', 'screenshot'],
+          permissions: ['tabs', 'host-permission', 'activeTab', 'scripting', 'storage'],
         },
       }), socket)
     }
 
     socket.onmessage = (event) => {
-      void handleMessage(event, socket)
+      void handleMessage(event)
     }
 
     socket.onclose = () => {
@@ -97,7 +96,7 @@ export function createBrokerClient(
     }
   }
 
-  async function handleMessage(event: MessageEvent, socket: WebSocket): Promise<void> {
+  async function handleMessage(event: MessageEvent): Promise<void> {
     let parsed: unknown
     try {
       const text = typeof event.data === 'string' ? event.data : await event.data.text()
@@ -105,18 +104,8 @@ export function createBrokerClient(
     } catch {
       return
     }
-
-    if (isAuthMessage(parsed) || !isJsonRpcRequest(parsed) || !options.onRequest) return
-
-    try {
-      const response = await options.onRequest(parsed)
-      sendJson(response, socket)
-    } catch (error) {
-      sendJson(createJsonRpcError(parsed.id, {
-        code: -32603,
-        message: error instanceof Error ? error.message : 'Internal error',
-      }), socket)
-    }
+    if (isAuthMessage(parsed) || !isJsonRpcRequest(parsed)) return
+    options.onRequest?.(parsed)
   }
 
   connect()
