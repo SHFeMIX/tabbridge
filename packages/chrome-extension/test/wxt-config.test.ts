@@ -14,11 +14,12 @@ const chromeBuildEnv = {
 } satisfies ConfigEnv
 
 describe('WXT manifest config', () => {
-  it('declares MVP permissions without nativeMessaging', () => {
+  it('declares MVP permissions with offscreen and alarms for MV3 keepalive', () => {
     expect(config.manifest).toMatchObject({
       name: 'TabBridge',
-      permissions: ['tabs', 'scripting', 'storage', 'activeTab'],
+      permissions: ['tabs', 'scripting', 'storage', 'activeTab', 'offscreen', 'alarms'],
       optional_host_permissions: ['http://*/*', 'https://*/*'],
+      minimum_chrome_version: '116',
     })
   })
 
