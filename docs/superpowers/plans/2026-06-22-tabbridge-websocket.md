@@ -36,10 +36,13 @@
 - `packages/cli/src/commands.ts` — map CLI parse result to JSON-RPC request.
 - `packages/cli/src/doctor.ts` — broker health diagnostics.
 - `packages/cli/src/main.ts` — updated command routing.
-- `packages/chrome-extension/src/background/broker-client.ts` — extension WebSocket client.
+- `packages/chrome-extension/src/background/broker-client.ts` — extension WebSocket client (moved to offscreen document in Task 8).
+- `packages/chrome-extension/src/offscreen/broker-client.ts` — offscreen document WebSocket client (Task 8).
+- `packages/chrome-extension/src/entrypoints/offscreen.ts` — offscreen document entrypoint (Task 8).
+- `packages/chrome-extension/src/entrypoints/offscreen.html` — offscreen document HTML (Task 8).
 - `packages/chrome-extension/src/background/jsonrpc-router.ts` — JSON-RPC method dispatch.
 - `packages/chrome-extension/src/background/commands.ts` — updated command handlers.
-- `packages/chrome-extension/src/entrypoints/background.ts` — wire broker client.
+- `packages/chrome-extension/src/entrypoints/background.ts` — wire offscreen document and route broker requests.
 - `packages/chrome-extension/wxt.config.ts` — remove `nativeMessaging` permission.
 - `vitest.workspace.ts` — replace `packages/native-host` with `packages/broker`.
 
@@ -485,7 +488,7 @@ Expected: runtime and lock tests pass.
 
 ```bash
 git add packages/broker pnpm-lock.yaml
-ngit commit -m "feat(broker): add runtime paths and singleton lock
+git commit -m "feat(broker): add runtime paths and singleton lock
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
@@ -1702,7 +1705,476 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Cleanup Old Native-Host Package and Workspace
+### Task 8: Offscreen Document WebSocket Keepalive
+
+**Files:**
+- Create: `packages/chrome-extension/src/entrypoints/offscreen.html`
+- Create: `packages/chrome-extension/src/entrypoints/offscreen.ts`
+- Create: `packages/chrome-extension/src/offscreen/broker-client.ts`
+- Modify: `packages/chrome-extension/src/entrypoints/background.ts`
+- Delete: `packages/chrome-extension/src/background/broker-client.ts`
+- Delete: `packages/chrome-extension/test/broker-client.test.ts`
+- Modify: `packages/chrome-extension/wxt.config.ts`
+- Create: `packages/chrome-extension/test/offscreen.test.ts`
+- Create: `packages/chrome-extension/test/background.test.ts`
+
+**Interfaces:**
+- Consumes: `JsonRpcRequest`, `JsonRpcResponse`, `BROKER_PORT`, `PROTOCOL_VERSION`, `createJsonRpcRequest` from `@tabbridge/shared`; `routeJsonRpcRequest` from `../background/jsonrpc-router`.
+- Produces: `createBrokerClient(url, extensionId, options)` in `packages/chrome-extension/src/offscreen/broker-client.ts`; offscreen-to-SW message protocol `{ type: 'broker.request', request: JsonRpcRequest }` and `{ type: 'broker.response', response: JsonRpcResponse }`; requires `chrome.runtime.getContexts()` API (Chrome 116+).
+
+**Why:** Chrome MV3 Service Worker is killed after ~30 seconds of inactivity. An open WebSocket does not count as activity, so the existing `background/broker-client.ts` connection dies. We move the WebSocket connection to an offscreen document (lifetime independent of the SW) and use `chrome.alarms` as a heartbeat fallback to recreate the offscreen document if the SW restarts.
+
+- [ ] **Step 1: Write failing tests**
+
+Create `packages/chrome-extension/test/offscreen.test.ts`:
+
+```ts
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it, vi } from 'vitest'
+import { createBrokerClient } from '../src/offscreen/broker-client'
+
+describe('offscreen broker client', () => {
+  it('does not import the Node-only broker package into offscreen code', () => {
+    const source = readFileSync(fileURLToPath(new URL('../src/offscreen/broker-client.ts', import.meta.url)), 'utf8')
+    expect(source).not.toContain("from '@tabbridge/broker'")
+  })
+
+  it('sends extension auth and hello after connecting', async () => {
+    const WebSocket = vi.fn()
+    let onopen: (() => void) | undefined
+    const send = vi.fn()
+    WebSocket.mockImplementation(() => ({
+      send,
+      close: vi.fn(),
+      readyState: 1,
+      set onopen(fn: () => void) { onopen = fn },
+      set onmessage(_fn: () => void) {},
+      set onclose(_fn: () => void) {},
+      set onerror(_fn: () => void) {},
+    }))
+
+    createBrokerClient('ws://127.0.0.1:9876', 'extid', {
+      WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+    })
+
+    onopen?.()
+
+    const messages = send.mock.calls.map((c) => JSON.parse(c[0] as string))
+    expect(messages[0]).toEqual({ type: 'auth', role: 'extension' })
+    expect(messages[1].method).toBe('broker.hello')
+    expect(messages[1].params.extensionId).toBe('extid')
+  })
+
+  it('forwards broker requests via onRequest callback', async () => {
+    type FakeSocket = {
+      send: ReturnType<typeof vi.fn>
+      close: ReturnType<typeof vi.fn>
+      readyState: number
+      onmessage?: (event: MessageEvent) => void
+    }
+    const sockets: FakeSocket[] = []
+    const WebSocket = vi.fn().mockImplementation(() => {
+      const socket: FakeSocket = { send: vi.fn(), close: vi.fn(), readyState: 1 }
+      let messageHandler: ((event: MessageEvent) => void) | undefined
+      Object.defineProperty(socket, 'onmessage', {
+        set(fn: (event: MessageEvent) => void) { messageHandler = fn },
+      })
+      sockets.push(socket)
+      return socket
+    })
+    const onRequest = vi.fn()
+
+    createBrokerClient('ws://127.0.0.1:9876', 'extid', {
+      WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
+      onRequest,
+    })
+
+    const request = {
+      jsonrpc: '2.0' as const,
+      id: 'r1',
+      method: 'tabs.list',
+      params: {},
+    }
+    sockets[0]!.onmessage?.({ data: JSON.stringify(request) } as MessageEvent)
+
+    expect(onRequest).toHaveBeenCalledWith(request)
+  })
+})
+```
+
+Create `packages/chrome-extension/test/background.test.ts`:
+
+```ts
+import { describe, expect, it, vi } from 'vitest'
+
+describe('background service worker', () => {
+  it('creates offscreen document on startup when none exists', async () => {
+    const createDocument = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('chrome', {
+      runtime: {
+        id: 'test-ext-id',
+        getURL: vi.fn().mockReturnValue('chrome-extension://test-ext-id/offscreen.html'),
+        getContexts: vi.fn().mockResolvedValue([]),
+        onMessage: { addListener: vi.fn() },
+      },
+      offscreen: {
+        createDocument,
+      },
+      alarms: {
+        create: vi.fn(),
+        onAlarm: { addListener: vi.fn() },
+      },
+      storage: {
+        local: { set: vi.fn() },
+      },
+    })
+
+    const { ensureOffscreenDocument } = await import('../src/entrypoints/background')
+    await ensureOffscreenDocument()
+
+    expect(createDocument).toHaveBeenCalledWith({
+      url: 'chrome-extension://test-ext-id/offscreen.html',
+      reasons: ['WORKERS'],
+      justification: 'Maintain persistent WebSocket connection to the TabBridge broker',
+    })
+  })
+})
+```
+
+- [ ] **Step 2: Run failing tests**
+
+```bash
+pnpm --filter @tabbridge/chrome-extension test
+```
+
+Expected: tests fail because `src/offscreen/broker-client.ts`, `src/entrypoints/offscreen.ts`, and `ensureOffscreenDocument` do not exist.
+
+- [ ] **Step 3: Move broker client to offscreen package**
+
+Create `packages/chrome-extension/src/offscreen/broker-client.ts`:
+
+```ts
+import {
+  BROKER_PORT,
+  PROTOCOL_VERSION,
+  type JsonRpcRequest,
+  type JsonRpcResponse,
+  createJsonRpcRequest,
+} from '@tabbridge/shared'
+
+export const DEFAULT_BROKER_URL = `ws://127.0.0.1:${BROKER_PORT}`
+const EXTENSION_VERSION = '0.1.0'
+const OPEN_READY_STATE = 1
+const DEFAULT_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000] as const
+
+export type OffscreenBrokerClientOptions = {
+  WebSocket?: typeof globalThis.WebSocket
+  reconnectDelaysMs?: readonly number[]
+  timer?: Pick<typeof globalThis, 'setTimeout' | 'clearTimeout'>
+  onRequest?: (request: JsonRpcRequest) => void
+  onDisconnect?: () => void
+}
+
+export type OffscreenBrokerClient = {
+  send(message: JsonRpcRequest | JsonRpcResponse): void
+  close(): void
+}
+
+export function createBrokerClient(
+  url: string,
+  extensionId: string,
+  options: OffscreenBrokerClientOptions = {},
+): OffscreenBrokerClient {
+  const WS = options.WebSocket ?? globalThis.WebSocket
+  const timer = options.timer ?? globalThis
+  const reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS
+  let ws: WebSocket | undefined
+  let messageId = 0
+  let reconnectTimer: ReturnType<typeof timer.setTimeout> | undefined
+  let stopped = false
+  let reconnectAttempt = 0
+
+  const clearReconnect = () => {
+    if (reconnectTimer === undefined) return
+    timer.clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
+
+  const scheduleReconnect = () => {
+    if (stopped || reconnectTimer !== undefined) return
+    const delay = reconnectDelaysMs[Math.min(reconnectAttempt, reconnectDelaysMs.length - 1)] ?? 5_000
+    reconnectAttempt += 1
+    reconnectTimer = timer.setTimeout(() => {
+      reconnectTimer = undefined
+      connect()
+    }, delay)
+  }
+
+  const sendJson = (message: unknown, socket = ws) => {
+    if (socket?.readyState !== OPEN_READY_STATE) return
+    socket.send(JSON.stringify(message))
+  }
+
+  const connect = () => {
+    clearReconnect()
+    const socket = new WS(url)
+    ws = socket
+
+    socket.onopen = () => {
+      reconnectAttempt = 0
+      sendJson({ type: 'auth', role: 'extension' }, socket)
+      sendJson(createJsonRpcRequest(`hello_${++messageId}`, 'broker.hello', {
+        protocolVersion: PROTOCOL_VERSION,
+        version: EXTENSION_VERSION,
+        extensionId,
+        capabilities: {
+          commands: ['status', 'tabs.list', 'tabs.current', 'tabs.requestAccess', 'snapshot'],
+          snapshot: ['semantic', 'text', 'html', 'screenshot'],
+          permissions: ['tabs', 'host-permission', 'activeTab', 'scripting', 'storage'],
+        },
+      }), socket)
+    }
+
+    socket.onmessage = (event) => {
+      void handleMessage(event, socket)
+    }
+
+    socket.onclose = () => {
+      if (ws !== socket) return
+      ws = undefined
+      if (stopped) return
+      options.onDisconnect?.()
+      scheduleReconnect()
+    }
+
+    socket.onerror = () => {
+      socket.close()
+    }
+  }
+
+  async function handleMessage(event: MessageEvent): Promise<void> {
+    let parsed: unknown
+    try {
+      const text = typeof event.data === 'string' ? event.data : await event.data.text()
+      parsed = JSON.parse(text)
+    } catch {
+      return
+    }
+    if (isAuthMessage(parsed) || !isJsonRpcRequest(parsed)) return
+    options.onRequest?.(parsed)
+  }
+
+  connect()
+
+  return {
+    send: sendJson,
+    close: () => {
+      stopped = true
+      clearReconnect()
+      ws?.close()
+      ws = undefined
+    },
+  }
+}
+
+function isAuthMessage(value: unknown): value is { type: 'auth' } {
+  return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'auth'
+}
+
+function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Partial<JsonRpcRequest>
+  return candidate.jsonrpc === '2.0' && typeof candidate.id === 'string' && typeof candidate.method === 'string'
+}
+```
+
+- [ ] **Step 4: Create offscreen document entrypoint**
+
+Create `packages/chrome-extension/src/entrypoints/offscreen.html`:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <script type="module" src="./offscreen.ts"></script>
+  </head>
+  <body>
+    <p>TabBridge offscreen document</p>
+  </body>
+</html>
+```
+
+Create `packages/chrome-extension/src/entrypoints/offscreen.ts`:
+
+```ts
+import { createBrokerClient, DEFAULT_BROKER_URL } from '../offscreen/broker-client'
+import type { JsonRpcRequest, JsonRpcResponse } from '@tabbridge/shared'
+
+const extensionId = chrome.runtime.id
+
+const client = createBrokerClient(DEFAULT_BROKER_URL, extensionId, {
+  onRequest: (request) => {
+    void chrome.runtime.sendMessage({ type: 'broker.request', request })
+  },
+  onDisconnect: () => {
+    void chrome.runtime.sendMessage({ type: 'broker.disconnected' })
+  },
+})
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'broker.response' && message.response) {
+    client.send(message.response as JsonRpcResponse)
+    sendResponse({ ok: true })
+    return true
+  }
+  return false
+})
+```
+
+- [ ] **Step 5: Refactor background service worker**
+
+Replace `packages/chrome-extension/src/entrypoints/background.ts`:
+
+```ts
+import { defineBackground } from 'wxt/utils/define-background'
+import type { JsonRpcRequest, JsonRpcResponse } from '@tabbridge/shared'
+import { routeJsonRpcRequest } from '../background/jsonrpc-router'
+
+const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html'
+const KEEPALIVE_ALARM_NAME = 'tabbridge-keepalive'
+const KEEPALIVE_INTERVAL_MINUTES = 1
+
+export async function ensureOffscreenDocument(): Promise<void> {
+  if (await hasOffscreenDocument()) return
+  await chrome.offscreen.createDocument({
+    url: chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH),
+    reasons: ['WORKERS'],
+    justification: 'Maintain persistent WebSocket connection to the TabBridge broker',
+  })
+}
+
+async function hasOffscreenDocument(): Promise<boolean> {
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)],
+  })
+  return contexts.length > 0
+}
+
+async function handleBrokerRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
+  return await routeJsonRpcRequest(request)
+}
+
+export default defineBackground(() => {
+  void ensureOffscreenDocument()
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'broker.response') {
+      sendResponse({ ok: true })
+      return true
+    }
+    if (message?.type === 'broker.disconnected') {
+      void ensureOffscreenDocument()
+      sendResponse({ ok: true })
+      return true
+    }
+    if (message?.type === 'broker.request' && message.request) {
+      void handleBrokerRequest(message.request as JsonRpcRequest)
+        .then((response) => {
+          void chrome.runtime.sendMessage({ type: 'broker.response', response })
+        })
+        .finally(() => sendResponse({ ok: true }))
+      return true
+    }
+    return false
+  })
+
+  chrome.alarms.create(KEEPALIVE_ALARM_NAME, { periodInMinutes: KEEPALIVE_INTERVAL_MINUTES })
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== KEEPALIVE_ALARM_NAME) return
+    void chrome.storage.local.set({ lastKeepAlive: Date.now() })
+    void ensureOffscreenDocument()
+  })
+})
+```
+
+- [ ] **Step 6: Update manifest permissions, minimum Chrome version, and config test**
+
+Modify `packages/chrome-extension/wxt.config.ts`:
+
+```ts
+import vue from '@vitejs/plugin-vue'
+import { defineConfig } from 'wxt'
+
+export default defineConfig({
+  srcDir: 'src',
+  manifest: {
+    name: 'TabBridge',
+    permissions: ['tabs', 'scripting', 'storage', 'activeTab', 'offscreen', 'alarms'],
+    optional_host_permissions: ['http://*/*', 'https://*/*'],
+    minimum_chrome_version: '116',
+  },
+  vite: () => ({
+    plugins: [vue()],
+  }),
+})
+```
+
+Update `packages/chrome-extension/test/wxt-config.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import config from '../wxt.config'
+
+describe('WXT manifest config', () => {
+  it('declares MVP permissions with offscreen and alarms for MV3 keepalive', () => {
+    expect(config.manifest).toMatchObject({
+      name: 'TabBridge',
+      permissions: ['tabs', 'scripting', 'storage', 'activeTab', 'offscreen', 'alarms'],
+      optional_host_permissions: ['http://*/*', 'https://*/*'],
+      minimum_chrome_version: '116',
+    })
+  })
+})
+```
+
+- [ ] **Step 7: Delete old background broker client**
+
+```bash
+rm packages/chrome-extension/src/background/broker-client.ts
+```
+
+- [ ] **Step 8: Run tests and typecheck**
+
+```bash
+pnpm --filter @tabbridge/chrome-extension test
+pnpm --filter @tabbridge/chrome-extension typecheck
+```
+
+Expected: all extension tests pass; TypeScript reports no errors.
+
+- [ ] **Step 9: Run full workspace tests**
+
+```bash
+pnpm test
+```
+
+Expected: all workspace tests pass.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add packages/chrome-extension
+git commit -m "feat(extension): move WebSocket to offscreen document for MV3 keepalive
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+---
+
+### Task 9: Cleanup Old Native-Host Package and Workspace
 
 **Files:**
 - Delete: `packages/native-host/`
@@ -1755,7 +2227,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
-### Task 9: End-to-End Smoke Verification
+### Task 10: End-to-End Smoke Verification
 
 **Files:**
 - None (manual verification).
@@ -1793,7 +2265,7 @@ Expected: first command starts broker automatically; second returns JSON-RPC res
 pnpm --filter @tabbridge/chrome-extension dev
 ```
 
-Open Chrome, load unpacked `.output/chrome-mv3-dev`. Confirm popup shows connected status after a CLI command has started the broker.
+Open Chrome, load unpacked `.output/chrome-mv3-dev`. Confirm popup shows connected status after a CLI command has started the broker. Then wait at least 60 seconds without interacting with the extension and run `tabbridge status --json` again; it should still report the extension as connected without requiring a refresh.
 
 - [ ] **Step 5: Run doctor**
 
@@ -1816,8 +2288,9 @@ Fix any issues found, then commit.
    - CLI token auth: Task 2, Task 5.
    - Extension origin-based auth: Task 7.
    - JSON-RPC 2.0 everywhere: Task 1, Task 3, Task 6, Task 7.
-   - Delete native host: Task 8.
-   - `tabbridge broker` command: Task 4 (via CLI `ensureBroker` spawn) and Task 9.
+   - Offscreen document WebSocket keepalive: Task 8.
+   - Delete native host: Task 9.
+   - `tabbridge broker` command: Task 4 (via CLI `ensureBroker` spawn) and Task 10.
    - `doctor` updated: Task 6.
    - No permanent daemon: broker exits when killed; CLI starts on demand.
 

@@ -5,7 +5,6 @@ describe('TabBridge errors', () => {
   it('exports the exact MVP error code set', () => {
     expect(ERROR_CODES).toEqual([
       'EXTENSION_NOT_CONNECTED',
-      'NATIVE_HOST_NOT_CONNECTED',
       'BRIDGE_SOCKET_UNAVAILABLE',
       'BRIDGE_REQUEST_TIMEOUT',
       'TAB_NOT_FOUND',
@@ -50,17 +49,11 @@ describe('TabBridge errors', () => {
     })
   })
 
-  it('distinguishes extension sleep from missing native host in recovery copy', () => {
+  it('describes extension disconnect recovery copy', () => {
     expect(bridgeNotConnectedError('extension_asleep')).toMatchObject({
       code: 'EXTENSION_NOT_CONNECTED',
       recoverable: true,
-      suggestedCommand: 'Open Chrome and click the TabBridge extension icon to start the bridge, then run tabbridge status --json.',
-    })
-
-    expect(bridgeNotConnectedError('native_host_missing')).toMatchObject({
-      code: 'NATIVE_HOST_NOT_CONNECTED',
-      recoverable: true,
-      suggestedCommand: 'Run tabbridge install-native-host --browser chrome --extension-id <id>, then run tabbridge doctor.',
+      suggestedCommand: 'Open Chrome and click the TabBridge extension icon to start the broker, then run tabbridge status --json.',
     })
   })
 })

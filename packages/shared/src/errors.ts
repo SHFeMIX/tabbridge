@@ -1,6 +1,5 @@
 export const ERROR_CODES = [
   'EXTENSION_NOT_CONNECTED',
-  'NATIVE_HOST_NOT_CONNECTED',
   'BRIDGE_SOCKET_UNAVAILABLE',
   'BRIDGE_REQUEST_TIMEOUT',
   'TAB_NOT_FOUND',
@@ -38,11 +37,7 @@ export type TabBridgeError = {
   expiresAt?: number
 }
 
-export type BridgeDisconnectedState =
-  | 'chrome_closed'
-  | 'extension_asleep'
-  | 'native_host_missing'
-  | 'native_host_running_no_extension'
+export type BridgeDisconnectedState = 'chrome_closed' | 'extension_asleep'
 
 export function tabNotAuthorizedError(tabId: number): TabBridgeError {
   return {
@@ -63,28 +58,10 @@ export function refStaleError(tabId: number): TabBridgeError {
 }
 
 export function bridgeNotConnectedError(state: BridgeDisconnectedState): TabBridgeError {
-  if (state === 'native_host_missing') {
-    return {
-      code: 'NATIVE_HOST_NOT_CONNECTED',
-      message: 'The TabBridge native host is not installed or its manifest path is invalid.',
-      recoverable: true,
-      suggestedCommand: 'Run tabbridge install-native-host --browser chrome --extension-id <id>, then run tabbridge doctor.',
-    }
-  }
-
-  if (state === 'native_host_running_no_extension') {
-    return {
-      code: 'NATIVE_HOST_NOT_CONNECTED',
-      message: 'The native host is running but the TabBridge extension is not connected.',
-      recoverable: true,
-      suggestedCommand: 'Open the TabBridge extension popup to reconnect the bridge, then run tabbridge status --json.',
-    }
-  }
-
   if (state === 'chrome_closed') {
     return {
       code: 'EXTENSION_NOT_CONNECTED',
-      message: 'Chrome is not connected to the TabBridge native host.',
+      message: 'Chrome is not connected to the TabBridge broker.',
       recoverable: true,
       suggestedCommand: 'Open Chrome, confirm the TabBridge extension is enabled, then run tabbridge status --json.',
     }
@@ -92,9 +69,9 @@ export function bridgeNotConnectedError(state: BridgeDisconnectedState): TabBrid
 
   return {
     code: 'EXTENSION_NOT_CONNECTED',
-    message: 'The TabBridge extension service worker is not connected to the native host.',
+    message: 'The TabBridge extension service worker is not connected to the broker.',
     recoverable: true,
-    suggestedCommand: 'Open Chrome and click the TabBridge extension icon to start the bridge, then run tabbridge status --json.',
+    suggestedCommand: 'Open Chrome and click the TabBridge extension icon to start the broker, then run tabbridge status --json.',
   }
 }
 

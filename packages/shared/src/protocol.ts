@@ -25,19 +25,6 @@ export function createBridgeRequest<TPayload = Record<string, unknown>>(input: O
   return { protocolVersion: PROTOCOL_VERSION, ...input }
 }
 
-export type BridgeHello = {
-  type: 'hello'
-  protocolVersion: typeof PROTOCOL_VERSION
-  role: 'native-host' | 'extension' | 'cli'
-  version: string
-  extensionId?: string
-  capabilities: {
-    commands: string[]
-    snapshot: Array<'semantic' | 'text' | 'html' | 'screenshot'>
-    permissions: string[]
-  }
-}
-
 export type BrokerHelloParams = {
   protocolVersion: typeof PROTOCOL_VERSION
   version: string
