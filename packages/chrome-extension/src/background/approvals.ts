@@ -1,4 +1,4 @@
-import { createApprovalRequiredError, errorEnvelope, transitionApproval, type ApprovalRecord, type CliEnvelope } from '@tabbridge/shared'
+import { createActionRequiresConfirmationError, createApprovalRequiredError, errorEnvelope, transitionApproval, type ApprovalRecord, type CliEnvelope } from '@tabbridge/shared'
 
 export type SiteAccessApprovalInput = {
   tabId: number
@@ -8,8 +8,17 @@ export type SiteAccessApprovalInput = {
   reason: string
 }
 
+export type HighRiskActionApprovalInput = {
+  tabId: number
+  domain: string
+  command: string
+  description: string
+  riskReasons: string[]
+  payloadSummary: string
+}
+
 export class ApprovalStore {
-  private approvals = new Map<string, ApprovalRecord & { tabId?: number; origin?: string; reason?: string }>()
+  private approvals = new Map<string, ApprovalRecord & { tabId?: number; origin?: string; reason?: string; command?: string }>()
 
   constructor(
     private readonly now: () => number,
@@ -34,7 +43,26 @@ export class ApprovalStore {
     return { approval, envelope: errorEnvelope(createApprovalRequiredError({ approvalId: id, expiresAt: approval.expiresAt })) }
   }
 
-  get(id: string): (ApprovalRecord & { tabId?: number; origin?: string; reason?: string }) | undefined {
+  createHighRiskActionApproval(input: HighRiskActionApprovalInput): { approval: ApprovalRecord; envelope: CliEnvelope<never> } {
+    const id = this.createId()
+    const approval: ApprovalRecord & { tabId: number; command: string } = {
+      id,
+      kind: 'high-risk-action',
+      status: 'pending',
+      createdAt: this.now(),
+      expiresAt: this.now() + 300_000,
+      summary: `${input.description} on ${input.domain}`,
+      executed: false,
+      tabId: input.tabId,
+      command: input.command,
+      riskReasons: input.riskReasons,
+      payloadSummary: input.payloadSummary,
+    }
+    this.approvals.set(id, approval)
+    return { approval, envelope: errorEnvelope(createActionRequiresConfirmationError({ approvalId: id, expiresAt: approval.expiresAt })) }
+  }
+
+  get(id: string): (ApprovalRecord & { tabId?: number; origin?: string; reason?: string; command?: string }) | undefined {
     return this.approvals.get(id)
   }
 
