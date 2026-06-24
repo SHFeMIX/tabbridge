@@ -1,5 +1,6 @@
 import { defineBackground } from 'wxt/utils/define-background'
 import type { JsonRpcRequest, JsonRpcResponse } from '@tabbridge/shared'
+import { approvalStore } from '../background/approvals'
 import { routeJsonRpcRequest } from '../background/jsonrpc-router'
 
 const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html'
@@ -27,10 +28,33 @@ async function handleBrokerRequest(request: JsonRpcRequest): Promise<JsonRpcResp
   return await routeJsonRpcRequest(request)
 }
 
+function isPopupMessage(message: unknown): message is { type: 'tabbridge.popup.listApprovals' } | { type: 'tabbridge.popup.decideApproval'; id: string; decision?: 'approve' | 'deny' } {
+  const record = message as { type?: string }
+  return record.type === 'tabbridge.popup.listApprovals' || record.type === 'tabbridge.popup.decideApproval'
+}
+
+async function handlePopupMessage(message: unknown): Promise<unknown> {
+  const record = message as { type?: string; id?: string; decision?: 'approve' | 'deny' }
+  if (record.type === 'tabbridge.popup.listApprovals') {
+    return { ok: true, data: { approvals: approvalStore.listPending() } }
+  }
+  if (record.type === 'tabbridge.popup.decideApproval' && typeof record.id === 'string') {
+    const transitionType = record.decision === 'approve' ? 'approve' : 'deny'
+    approvalStore.transition(record.id, transitionType)
+    return { ok: true, data: { approvals: approvalStore.listPending() } }
+  }
+  return undefined
+}
+
 export default defineBackground(() => {
   void ensureOffscreenDocument()
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (isPopupMessage(message)) {
+      void handlePopupMessage(message).then((response) => sendResponse(response))
+      return true
+    }
+
     if (message?.type === 'broker.response') {
       sendResponse({ ok: true })
       return true

@@ -78,3 +78,8 @@ export class ApprovalStore {
     return Array.from(this.approvals.values()).filter((approval) => approval.status === 'pending')
   }
 }
+
+export const approvalStore = new ApprovalStore(
+  () => Date.now(),
+  () => `appr_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+)
