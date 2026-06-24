@@ -5,6 +5,7 @@ import type { SiteGrant } from '@tabbridge/shared'
 export type CommandContext = {
   listTabs(): Promise<unknown[]>
   currentTab(): Promise<unknown | undefined>
+  sendMessageToTab?(tabId: number, message: unknown): Promise<unknown>
 }
 
 let grants: SiteGrant[] = []
@@ -35,8 +36,36 @@ export async function routeBridgeCommand(request: BridgeRequest, context?: Comma
   }
 
   if (request.command === 'snapshot') {
-    const payload = request.payload as { tabId: number }
-    return errorEnvelope(tabNotAuthorizedError(payload.tabId))
+    const payload = request.payload as { tabId: number; snapshotId?: string; includeUrl?: boolean }
+    if (!context?.sendMessageToTab) {
+      return errorEnvelope({ code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE', message: 'Snapshot messaging is not available.', recoverable: false })
+    }
+    try {
+      const result = await context.sendMessageToTab(payload.tabId, {
+        type: 'tabbridge.snapshot',
+        tabId: payload.tabId,
+        snapshotId: payload.snapshotId ?? `snap_${Date.now()}`,
+        includeUrl: payload.includeUrl,
+      })
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'data' in result) {
+        return okEnvelope(result.data)
+      }
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === false && 'error' in result) {
+        const errorData = result.error as { code: string; message: string; recoverable: boolean }
+        return errorEnvelope({
+          code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE',
+          message: errorData.message,
+          recoverable: errorData.recoverable,
+        })
+      }
+      return errorEnvelope({
+        code: 'BROWSER_COMMAND_TIMEOUT',
+        message: 'Unexpected response from content script.',
+        recoverable: true,
+      })
+    } catch {
+      return errorEnvelope(tabNotAuthorizedError(payload.tabId))
+    }
   }
 
   return errorEnvelope({
