@@ -1,4 +1,4 @@
-import { errorEnvelope, okEnvelope, tabNotAuthorizedError, type BridgeRequest, type CliEnvelope } from '@tabbridge/shared'
+import { errorEnvelope, okEnvelope, tabNotAuthorizedError, type BridgeRequest, type CliEnvelope, type TabBridgeErrorCode } from '@tabbridge/shared'
 import { listRedactedTabs } from './tabs'
 import type { SiteGrant } from '@tabbridge/shared'
 
@@ -51,12 +51,16 @@ export async function routeBridgeCommand(request: BridgeRequest, context?: Comma
         return okEnvelope(result.data)
       }
       if (result && typeof result === 'object' && 'ok' in result && result.ok === false && 'error' in result) {
-        const errorData = result.error as { code: string; message: string; recoverable: boolean }
-        return errorEnvelope({
-          code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE',
+        const errorData = result.error as { code: string; message: string; recoverable: boolean; suggestedCommand?: string }
+        const error = {
+          code: errorData.code as TabBridgeErrorCode,
           message: errorData.message,
           recoverable: errorData.recoverable,
-        })
+        }
+        if (errorData.suggestedCommand) {
+          Object.assign(error, { suggestedCommand: errorData.suggestedCommand })
+        }
+        return errorEnvelope(error)
       }
       return errorEnvelope({
         code: 'BROWSER_COMMAND_TIMEOUT',

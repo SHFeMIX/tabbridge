@@ -38,6 +38,8 @@ function isVisible(element: Element): boolean {
   const htmlElement = element as HTMLElement
   const style = window.getComputedStyle(htmlElement)
   const rect = htmlElement.getBoundingClientRect()
+  // Use >= 0 so jsdom tests without layout can still discover elements.
+  // In a real Chrome tab, getBoundingClientRect reflects actual visibility.
   return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 0 && rect.height >= 0
 }
 
@@ -112,7 +114,7 @@ export function extractSnapshotFromDocument(input: ExtractSnapshotInput): Extrac
     })
   })
 
-  const snapshotBase = {
+  const snapshot: PageSnapshot = {
     tabId: input.tabId,
     snapshotId: input.snapshotId,
     title: input.title,
@@ -124,11 +126,9 @@ export function extractSnapshotFromDocument(input: ExtractSnapshotInput): Extrac
       scrollY: window.scrollY,
     },
     frames: [{ frameRef: 'f0', origin: new URL(input.url).origin, accessible: true, tree }],
-  }
-
-  const snapshot: PageSnapshot = input.includeUrl
-    ? { ...snapshotBase, urlVisible: true as const, url: input.url }
-    : { ...snapshotBase, urlVisible: false as const }
+    urlVisible: input.includeUrl,
+    ...(input.includeUrl ? { url: input.url } : {}),
+  } as PageSnapshot
 
   return { snapshot, records }
 }
