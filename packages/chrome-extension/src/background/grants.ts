@@ -24,7 +24,9 @@ export function grantStatusForTab(grants: SiteGrant[], tab: { tabId: number; url
     return 'none'
   }
 
-  const sameTabGrant = grants.find((grant) => grant.tabId === tab.tabId)
+  const sameTabGrant = grants
+    .filter((grant) => grant.tabId === tab.tabId)
+    .sort((a, b) => b.grantedByUserAt - a.grantedByUserAt)[0]
   if (!sameTabGrant) return 'none'
   if (sameTabGrant.origin === origin && sameTabGrant.expiresAt > now) return 'authorized'
   return 'expired-or-cross-origin'

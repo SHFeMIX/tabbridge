@@ -6,8 +6,11 @@ export type BoundedReadResult =
 function limitUtf8(input: string, maxBytes: number): { value: string; truncated: boolean } {
   const encoder = new TextEncoder()
   let output = ''
+  let byteLength = 0
   for (const char of input) {
-    if (encoder.encode(output + char).byteLength > maxBytes) return { value: output, truncated: true }
+    const charBytes = encoder.encode(char).byteLength
+    if (byteLength + charBytes > maxBytes) return { value: output, truncated: true }
+    byteLength += charBytes
     output += char
   }
   return { value: output, truncated: false }

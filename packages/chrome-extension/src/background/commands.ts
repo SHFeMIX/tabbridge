@@ -346,7 +346,7 @@ export async function routeBridgeCommand(request: BridgeRequest, context?: Comma
 
   if (request.command === 'action.clickCoordinates') {
     const payload = request.payload as { tabId: number; x: number; y: number }
-    const confirm = createCoordinateActionApproval(payload.tabId, 'click-coordinates', `Click coordinates (${payload.x}, ${payload.y})`)
+    const confirm = await createCoordinateActionApproval(payload.tabId, 'click-coordinates', `Click coordinates (${payload.x}, ${payload.y})`, context)
     if (confirm) return confirm
     return runActionOnTab(payload.tabId, context, {
       type: 'tabbridge.clickCoordinates',
@@ -358,7 +358,7 @@ export async function routeBridgeCommand(request: BridgeRequest, context?: Comma
 
   if (request.command === 'action.dragCoordinates') {
     const payload = request.payload as { tabId: number; fromX: number; fromY: number; toX: number; toY: number }
-    const confirm = createCoordinateActionApproval(payload.tabId, 'drag-coordinates', `Drag coordinates from (${payload.fromX}, ${payload.fromY}) to (${payload.toX}, ${payload.toY})`)
+    const confirm = await createCoordinateActionApproval(payload.tabId, 'drag-coordinates', `Drag coordinates from (${payload.fromX}, ${payload.fromY}) to (${payload.toX}, ${payload.toY})`, context)
     if (confirm) return confirm
     return runActionOnTab(payload.tabId, context, {
       type: 'tabbridge.dragCoordinates',
@@ -404,14 +404,30 @@ async function runActionOnTab(tabId: number, context: CommandContext | undefined
     }
     return errorEnvelope({ code: 'BROWSER_COMMAND_TIMEOUT', message: 'Unexpected response from content script.', recoverable: true })
   } catch {
-    return errorEnvelope(tabNotAuthorizedError(tabId))
+    return errorEnvelope({
+      code: 'BROWSER_COMMAND_TIMEOUT',
+      message: 'The extension could not communicate with the tab. Confirm the tab is still open and authorized.',
+      recoverable: true,
+      suggestedCommand: `tabbridge tabs request-access --tab ${tabId} --reason <reason> --json`,
+    })
   }
 }
 
-function createCoordinateActionApproval(tabId: number, command: string, description: string): CliEnvelope<never> | undefined {
+async function createCoordinateActionApproval(tabId: number, command: string, description: string, context: CommandContext | undefined): Promise<CliEnvelope<never> | undefined> {
+  let domain = 'current-tab'
+  if (context?.getTab) {
+    const tab = await context.getTab(tabId)
+    if (tab?.url) {
+      try {
+        domain = new URL(tab.url).hostname
+      } catch {
+        domain = 'current-tab'
+      }
+    }
+  }
   const result = approvalStore.createHighRiskActionApproval({
     tabId,
-    domain: 'current-tab',
+    domain,
     command,
     description,
     riskReasons: ['coordinate action cannot be tied to a stable semantic ref'],
