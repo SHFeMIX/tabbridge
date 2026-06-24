@@ -1,6 +1,9 @@
 import { errorEnvelope, okEnvelope, tabNotAuthorizedError, type BridgeRequest, type CliEnvelope, type TabBridgeErrorCode } from '@tabbridge/shared'
 import { listRedactedTabs } from './tabs'
+import { createScreenshotController } from './screenshot'
 import type { SiteGrant } from '@tabbridge/shared'
+
+const screenshotController = createScreenshotController(() => Date.now())
 
 export type CommandContext = {
   listTabs(): Promise<unknown[]>
@@ -67,6 +70,113 @@ export async function routeBridgeCommand(request: BridgeRequest, context?: Comma
         message: 'Unexpected response from content script.',
         recoverable: true,
       })
+    } catch {
+      return errorEnvelope(tabNotAuthorizedError(payload.tabId))
+    }
+  }
+
+  if (request.command === 'text') {
+    const payload = request.payload as { tabId: number; maxBytes?: number }
+    if (!context?.sendMessageToTab) {
+      return errorEnvelope({ code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE', message: 'Text read messaging is not available.', recoverable: false })
+    }
+    try {
+      const result = await context.sendMessageToTab(payload.tabId, {
+        type: 'tabbridge.text',
+        tabId: payload.tabId,
+        maxBytes: payload.maxBytes,
+      })
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'data' in result) {
+        return okEnvelope(result.data)
+      }
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === false && 'error' in result) {
+        const errorData = result.error as { code: string; message: string; recoverable: boolean; suggestedCommand?: string }
+        const error = {
+          code: errorData.code as TabBridgeErrorCode,
+          message: errorData.message,
+          recoverable: errorData.recoverable,
+        }
+        if (errorData.suggestedCommand) {
+          Object.assign(error, { suggestedCommand: errorData.suggestedCommand })
+        }
+        return errorEnvelope(error)
+      }
+      return errorEnvelope({
+        code: 'BROWSER_COMMAND_TIMEOUT',
+        message: 'Unexpected response from content script.',
+        recoverable: true,
+      })
+    } catch {
+      return errorEnvelope(tabNotAuthorizedError(payload.tabId))
+    }
+  }
+
+  if (request.command === 'html') {
+    const payload = request.payload as { tabId: number; snapshotId: string; ref: string; frameRef?: string; maxBytes?: number }
+    if (!context?.sendMessageToTab) {
+      return errorEnvelope({ code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE', message: 'HTML read messaging is not available.', recoverable: false })
+    }
+    try {
+      const result = await context.sendMessageToTab(payload.tabId, {
+        type: 'tabbridge.html',
+        tabId: payload.tabId,
+        snapshotId: payload.snapshotId,
+        ref: payload.ref,
+        frameRef: payload.frameRef,
+        maxBytes: payload.maxBytes,
+      })
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'data' in result) {
+        return okEnvelope(result.data)
+      }
+      if (result && typeof result === 'object' && 'ok' in result && result.ok === false && 'error' in result) {
+        const errorData = result.error as { code: string; message: string; recoverable: boolean; suggestedCommand?: string }
+        const error = {
+          code: errorData.code as TabBridgeErrorCode,
+          message: errorData.message,
+          recoverable: errorData.recoverable,
+        }
+        if (errorData.suggestedCommand) {
+          Object.assign(error, { suggestedCommand: errorData.suggestedCommand })
+        }
+        return errorEnvelope(error)
+      }
+      return errorEnvelope({
+        code: 'BROWSER_COMMAND_TIMEOUT',
+        message: 'Unexpected response from content script.',
+        recoverable: true,
+      })
+    } catch {
+      return errorEnvelope(tabNotAuthorizedError(payload.tabId))
+    }
+  }
+
+  if (request.command === 'screenshot') {
+    const payload = request.payload as { tabId: number }
+    if (!context?.sendMessageToTab) {
+      return errorEnvelope({ code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE', message: 'Screenshot messaging is not available.', recoverable: false })
+    }
+    try {
+      const tab = await context.currentTab()
+      if (!tab || typeof tab !== 'object' || !('id' in tab)) {
+        return errorEnvelope({ code: 'TAB_NOT_FOUND', message: 'No focused normal Chrome window has an active tab.', recoverable: true })
+      }
+      const chromeTab = tab as { id?: number; windowId?: number; active?: boolean }
+      if (chromeTab.id !== payload.tabId) {
+        return errorEnvelope({
+          code: 'TAB_NOT_ACTIVE_FOR_SCREENSHOT',
+          message: 'Screenshot is only supported for the current active tab in the selected window.',
+          recoverable: true,
+          suggestedCommand: `Activate the target tab in Chrome, then retry tabbridge screenshot --tab ${payload.tabId} --json.`,
+        })
+      }
+      const result = await screenshotController.capture(
+        { tabId: payload.tabId, windowId: chromeTab.windowId ?? 0, active: Boolean(chromeTab.active) },
+        async (windowId) => {
+          const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' })
+          return dataUrl
+        },
+      )
+      return result
     } catch {
       return errorEnvelope(tabNotAuthorizedError(payload.tabId))
     }
