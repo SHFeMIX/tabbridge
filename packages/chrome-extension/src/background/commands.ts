@@ -1,40 +1,82 @@
-import { redactChromeTab, type ChromeTabLike, type TabBridgeError } from '@tabbridge/shared'
+import { errorEnvelope, okEnvelope, tabNotAuthorizedError, type BridgeRequest, type CliEnvelope } from '@tabbridge/shared'
+import { listRedactedTabs } from './tabs'
+import type { SiteGrant } from '@tabbridge/shared'
 
-export async function routeBridgeMethod(method: string, _params: unknown): Promise<unknown> {
-  if (method === 'status') {
-    return { bridge: 'connected' }
-  }
-
-  if (method === 'tabs.list') {
-    const tabs = await chrome.tabs.query({})
-    return tabs.map((tab) => redactChromeTab(toChromeTabLike(tab)))
-  }
-
-  if (method === 'tabs.current') {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (!tab) {
-      const error: TabBridgeError = {
-        code: 'TAB_NOT_FOUND',
-        message: 'No active tab was found in the current Chrome window.',
-        recoverable: true,
-        suggestedCommand: 'Focus a Chrome window with an active tab, then run tabbridge tabs current --json.',
-      }
-      throw error
-    }
-    return redactChromeTab(toChromeTabLike(tab))
-  }
-
-  const error: TabBridgeError = {
-    code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE',
-    message: `Method ${method} is not implemented by the extension command router yet.`,
-    recoverable: false,
-  }
-  throw error
+export type CommandContext = {
+  listTabs(): Promise<unknown[]>
+  currentTab(): Promise<unknown | undefined>
 }
 
+let grants: SiteGrant[] = []
 
-function toChromeTabLike(tab: chrome.tabs.Tab): ChromeTabLike {
-  const tabLike: ChromeTabLike = {
+export function getGrants(): SiteGrant[] {
+  return grants
+}
+
+export function setGrants(newGrants: SiteGrant[]): void {
+  grants = newGrants
+}
+
+export async function routeBridgeCommand(request: BridgeRequest, context?: CommandContext): Promise<CliEnvelope<unknown>> {
+  if (request.command === 'status') {
+    return okEnvelope({ bridge: 'connected' })
+  }
+
+  if (request.command === 'tabs.list' && context) {
+    return okEnvelope(await context.listTabs())
+  }
+
+  if (request.command === 'tabs.current' && context) {
+    const tab = await context.currentTab()
+    if (!tab) {
+      return errorEnvelope({ code: 'TAB_NOT_FOUND', message: 'No focused normal Chrome window has an active tab.', recoverable: true })
+    }
+    return okEnvelope(tab)
+  }
+
+  if (request.command === 'snapshot') {
+    const payload = request.payload as { tabId: number }
+    return errorEnvelope(tabNotAuthorizedError(payload.tabId))
+  }
+
+  return errorEnvelope({
+    code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE',
+    message: `Command ${request.command} is not implemented by the extension command router yet.`,
+    recoverable: false,
+  })
+}
+
+// Backward-compatible wrapper for existing JSON-RPC router and tests
+export async function routeBridgeMethod(method: string, _params: unknown): Promise<unknown> {
+  const request: BridgeRequest = {
+    id: 'legacy',
+    protocolVersion: 1 as const,
+    source: 'cli',
+    target: 'extension',
+    command: method,
+    payload: typeof _params === 'object' && _params !== null ? _params as Record<string, unknown> : {},
+    createdAt: Date.now(),
+  }
+
+  const context: CommandContext = {
+    async listTabs() {
+      const chromeTabs = await chrome.tabs.query({})
+      return listRedactedTabs(chromeTabs.map(toChromeTabLike), grants, Date.now())
+    },
+    async currentTab() {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab) return undefined
+      return listRedactedTabs([toChromeTabLike(tab)], grants, Date.now())[0]
+    },
+  }
+
+  const envelope = await routeBridgeCommand(request, context)
+  if (envelope.ok) return envelope.data
+  throw envelope.error
+}
+
+function toChromeTabLike(tab: chrome.tabs.Tab): import('@tabbridge/shared').ChromeTabLike {
+  const tabLike: import('@tabbridge/shared').ChromeTabLike = {
     windowId: tab.windowId,
     active: tab.active,
   }
