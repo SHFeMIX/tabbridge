@@ -70,6 +70,24 @@ export default defineContentScript({
         return true
       }
 
+      if (message?.type === 'tabbridge.waitForText') {
+        const started = Date.now()
+        const timeoutMs = message.timeoutMs ?? 30_000
+        const poll = () => {
+          if ((document.body.textContent ?? '').includes(message.text)) {
+            sendResponse({ ok: true, data: { found: true, text: message.text } })
+            return
+          }
+          if (Date.now() - started >= timeoutMs) {
+            sendResponse({ ok: true, data: { found: false, text: message.text } })
+            return
+          }
+          setTimeout(poll, 50)
+        }
+        poll()
+        return true
+      }
+
       return false
     })
   },

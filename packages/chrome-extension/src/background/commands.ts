@@ -1,6 +1,7 @@
 import { errorEnvelope, okEnvelope, tabNotAuthorizedError, type BridgeRequest, type CliEnvelope, type TabBridgeErrorCode } from '@tabbridge/shared'
 import { listRedactedTabs } from './tabs'
 import { createScreenshotController } from './screenshot'
+import { ExtensionActionQueue } from './action-queue'
 import type { SiteGrant } from '@tabbridge/shared'
 
 const screenshotController = createScreenshotController(() => Date.now())
@@ -9,7 +10,12 @@ export type CommandContext = {
   listTabs(): Promise<unknown[]>
   currentTab(): Promise<unknown | undefined>
   sendMessageToTab?(tabId: number, message: unknown): Promise<unknown>
+  reloadTab?(tabId: number): Promise<void>
+  goBack?(tabId: number): Promise<void>
+  goForward?(tabId: number): Promise<void>
 }
+
+const actionQueue = new ExtensionActionQueue()
 
 let grants: SiteGrant[] = []
 
@@ -19,6 +25,20 @@ export function getGrants(): SiteGrant[] {
 
 export function setGrants(newGrants: SiteGrant[]): void {
   grants = newGrants
+}
+
+export async function waitMs(ms: number): Promise<{ waitedMs: number }> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+  return { waitedMs: ms }
+}
+
+export async function waitForTextInDocument(doc: Document, text: string, timeoutMs: number): Promise<{ found: boolean; text: string }> {
+  const started = Date.now()
+  while (Date.now() - started <= timeoutMs) {
+    if ((doc.body.textContent ?? '').includes(text)) return { found: true, text }
+    await waitMs(50)
+  }
+  return { found: false, text }
 }
 
 export async function routeBridgeCommand(request: BridgeRequest, context?: CommandContext): Promise<CliEnvelope<unknown>> {
@@ -180,6 +200,37 @@ export async function routeBridgeCommand(request: BridgeRequest, context?: Comma
     } catch {
       return errorEnvelope(tabNotAuthorizedError(payload.tabId))
     }
+  }
+
+  if (request.command === 'wait') {
+    const payload = request.payload as { tabId: number; ms: number }
+    return actionQueue.run(payload.tabId, async () => okEnvelope(await waitMs(payload.ms)))
+  }
+
+  if (request.command === 'waitForText') {
+    const payload = request.payload as { tabId: number; text: string; timeoutMs?: number }
+    if (!context?.sendMessageToTab) {
+      return errorEnvelope({ code: 'BROWSER_COMMAND_TIMEOUT', message: 'Cannot wait for text without an extension command context.', recoverable: true })
+    }
+    return actionQueue.run(payload.tabId, async () => okEnvelope(await context.sendMessageToTab!(payload.tabId, {
+      type: 'tabbridge.waitForText',
+      text: payload.text,
+      timeoutMs: payload.timeoutMs ?? 30_000,
+    })))
+  }
+
+  if (request.command === 'navigation.reload' || request.command === 'navigation.back' || request.command === 'navigation.forward') {
+    const payload = request.payload as { tabId: number }
+    if (!context?.sendMessageToTab) {
+      return errorEnvelope({ code: 'BROWSER_COMMAND_TIMEOUT', message: 'Cannot run navigation without an extension command context.', recoverable: true })
+    }
+    return actionQueue.run(payload.tabId, async () => {
+      if (request.command === 'navigation.reload' && context.reloadTab) await context.reloadTab(payload.tabId)
+      if (request.command === 'navigation.back' && context.goBack) await context.goBack(payload.tabId)
+      if (request.command === 'navigation.forward' && context.goForward) await context.goForward(payload.tabId)
+      await context.sendMessageToTab!(payload.tabId, { type: 'tabbridge.clearRefs', tabId: payload.tabId })
+      return okEnvelope({ navigated: true, refsCleared: true })
+    })
   }
 
   return errorEnvelope({
