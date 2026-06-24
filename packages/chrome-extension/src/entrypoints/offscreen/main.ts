@@ -12,7 +12,8 @@ const client = createBrokerClient(DEFAULT_BROKER_URL, extensionId, {
   },
 })
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender.id !== extensionId) return false
   if (message?.type === 'broker.response' && message.response) {
     client.send(message.response as JsonRpcResponse)
     sendResponse({ ok: true })
