@@ -64,6 +64,46 @@ export default defineContentScript({
         return true
       }
 
+      if (message?.type === 'tabbridge.press') {
+        const eventInit = { key: message.key, bubbles: true } as KeyboardEventInit
+        document.dispatchEvent(new KeyboardEvent('keydown', eventInit))
+        document.dispatchEvent(new KeyboardEvent('keyup', eventInit))
+        sendResponse({ ok: true, data: { pressed: message.key } })
+        return true
+      }
+
+      if (message?.type === 'tabbridge.scroll') {
+        window.scrollBy(message.dx ?? 0, message.dy ?? 0)
+        sendResponse({ ok: true, data: { scrollX: window.scrollX, scrollY: window.scrollY } })
+        return true
+      }
+
+      if (message?.type === 'tabbridge.clickCoordinates') {
+        const element = document.elementFromPoint(message.x, message.y)
+        if (element) {
+          ;(element as HTMLElement).click()
+          sendResponse({ ok: true, data: { clicked: true } })
+        } else {
+          sendResponse(errorEnvelope({ code: 'ELEMENT_NOT_VISIBLE', message: 'No element at the given coordinates.', recoverable: true }))
+        }
+        return true
+      }
+
+      if (message?.type === 'tabbridge.dragCoordinates') {
+        const from = document.elementFromPoint(message.fromX, message.fromY)
+        const to = document.elementFromPoint(message.toX, message.toY)
+        if (!from || !to) {
+          sendResponse(errorEnvelope({ code: 'ELEMENT_NOT_VISIBLE', message: 'No element at the given coordinates.', recoverable: true }))
+          return true
+        }
+        const dataTransfer = new DataTransfer()
+        from.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }))
+        to.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }))
+        from.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }))
+        sendResponse({ ok: true, data: { dragged: true } })
+        return true
+      }
+
       if (message?.type === 'tabbridge.clearRefs') {
         refStore.clearForTab(message.tabId)
         sendResponse({ ok: true, data: { cleared: true } })

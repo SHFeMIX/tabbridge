@@ -1,6 +1,8 @@
+import { createSiteGrant } from '@tabbridge/shared'
 import { defineBackground } from 'wxt/utils/define-background'
 import type { JsonRpcRequest, JsonRpcResponse } from '@tabbridge/shared'
 import { approvalStore } from '../background/approvals'
+import { addGrant } from '../background/grants'
 import { routeJsonRpcRequest } from '../background/jsonrpc-router'
 
 const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html'
@@ -40,7 +42,13 @@ async function handlePopupMessage(message: unknown): Promise<unknown> {
   }
   if (record.type === 'tabbridge.popup.decideApproval' && typeof record.id === 'string') {
     const transitionType = record.decision === 'approve' ? 'approve' : 'deny'
-    approvalStore.transition(record.id, transitionType)
+    const approval = approvalStore.transition(record.id, transitionType)
+    if (approval && approval.status === 'approved' && approval.kind === 'site-access') {
+      const siteAccess = approval as { tabId?: number; origin?: string }
+      if (typeof siteAccess.tabId === 'number' && typeof siteAccess.origin === 'string') {
+        addGrant(createSiteGrant({ tabId: siteAccess.tabId, origin: siteAccess.origin, grantedByUserAt: Date.now() }))
+      }
+    }
     return { ok: true, data: { approvals: approvalStore.listPending() } }
   }
   return undefined

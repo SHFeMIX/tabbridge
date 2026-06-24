@@ -1,15 +1,17 @@
 import { errorEnvelope, okEnvelope, tabNotAuthorizedError, type BridgeRequest, type CliEnvelope, type TabBridgeErrorCode } from '@tabbridge/shared'
 import { ExtensionActionQueue } from './action-queue'
 import { createScreenshotController } from './screenshot'
-import { getGrants, setGrants, releaseGrant } from './grants'
+import { addGrant, getGrants, grantStatusForTab, releaseGrant, setGrants } from './grants'
 import { listRedactedTabs } from './tabs'
-import type { SiteGrant } from '@tabbridge/shared'
+import { approvalStore } from './approvals'
+import { classifyRisk, createSiteGrant, originFromUrl, type ChromeTabLike, type SiteGrant } from '@tabbridge/shared'
 
 const screenshotController = createScreenshotController(() => Date.now())
 
 export type CommandContext = {
   listTabs(): Promise<unknown[]>
   currentTab(): Promise<unknown | undefined>
+  getTab?(tabId: number): Promise<ChromeTabLike | undefined>
   sendMessageToTab?(tabId: number, message: unknown): Promise<unknown>
   reloadTab?(tabId: number): Promise<void>
   goBack?(tabId: number): Promise<void>
@@ -224,11 +226,198 @@ export async function routeBridgeCommand(request: BridgeRequest, context?: Comma
     })
   }
 
+  if (request.command === 'tabs.requestAccess') {
+    const payload = request.payload as { tabId: number; reason: string }
+    if (!context?.getTab) {
+      return errorEnvelope({ code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE', message: 'Tab lookup is not available.', recoverable: false })
+    }
+    const tab = await context.getTab(payload.tabId)
+    if (!tab || !tab.url) {
+      return errorEnvelope({ code: 'TAB_NOT_FOUND', message: 'Tab not found or has no URL.', recoverable: true })
+    }
+    try {
+      const origin = originFromUrl(tab.url)
+      const existing = getGrants().find((grant) => grant.tabId === payload.tabId && grant.origin === origin)
+      if (existing && existing.expiresAt > Date.now()) {
+        return okEnvelope({ granted: true, expiresAt: existing.expiresAt })
+      }
+      const result = approvalStore.createSiteAccessApproval({
+        tabId: payload.tabId,
+        title: tab.title ?? 'Untitled tab',
+        domain: new URL(tab.url).hostname,
+        origin,
+        reason: payload.reason,
+      })
+      return result.envelope
+    } catch {
+      return errorEnvelope({ code: 'UNSUPPORTED_PAGE', message: 'Cannot request access for this page.', recoverable: false })
+    }
+  }
+
+  if (request.command === 'tabs.release') {
+    const payload = request.payload as { tabId: number }
+    setGrants(releaseGrant(getGrants(), payload.tabId))
+    return okEnvelope({ released: true })
+  }
+
+  if (request.command === 'approvals.status') {
+    const payload = request.payload as { approvalId: string }
+    const approval = approvalStore.get(payload.approvalId)
+    if (!approval) {
+      return errorEnvelope({ code: 'APPROVAL_TIMEOUT', message: 'Approval not found.', recoverable: false })
+    }
+    return okEnvelope({ approval })
+  }
+
+  if (request.command === 'approvals.wait') {
+    const payload = request.payload as { approvalId: string; timeoutMs?: number }
+    const timeoutMs = payload.timeoutMs ?? 30_000
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const approval = approvalStore.get(payload.approvalId)
+      if (!approval) {
+        return errorEnvelope({ code: 'APPROVAL_TIMEOUT', message: 'Approval not found.', recoverable: false })
+      }
+      if (approval.status === 'approved') {
+        return okEnvelope({ approved: true, approval })
+      }
+      if (approval.status === 'denied' || approval.status === 'expired' || approval.status === 'canceled') {
+        return errorEnvelope({ code: 'USER_DENIED', message: 'Approval was denied, expired, or canceled.', recoverable: false })
+      }
+      await waitMs(250)
+    }
+    return errorEnvelope({ code: 'APPROVAL_TIMEOUT', message: 'Timed out waiting for approval.', recoverable: true })
+  }
+
+  if (request.command === 'approvals.cancel') {
+    const payload = request.payload as { approvalId: string }
+    const approval = approvalStore.transition(payload.approvalId, 'cancel')
+    if (!approval) {
+      return errorEnvelope({ code: 'APPROVAL_TIMEOUT', message: 'Approval not found.', recoverable: false })
+    }
+    return okEnvelope({ canceled: true, approval })
+  }
+
+  const refActions = new Set(['action.click', 'action.clear', 'action.select', 'action.check', 'action.uncheck', 'action.focus'])
+  if (refActions.has(request.command)) {
+    const payload = request.payload as { tabId: number; snapshotId: string; ref: string; frameRef?: string; value?: string }
+    return runActionOnTab(payload.tabId, context, {
+      type: 'tabbridge.action',
+      command: request.command.replace('action.', ''),
+      tabId: payload.tabId,
+      snapshotId: payload.snapshotId,
+      frameRef: payload.frameRef ?? 'f0',
+      ref: payload.ref,
+      value: payload.value,
+    })
+  }
+
+  if (request.command === 'action.type') {
+    const payload = request.payload as { tabId: number; snapshotId: string; ref: string; frameRef?: string; text?: string }
+    return runActionOnTab(payload.tabId, context, {
+      type: 'tabbridge.action',
+      command: 'type',
+      tabId: payload.tabId,
+      snapshotId: payload.snapshotId,
+      frameRef: payload.frameRef ?? 'f0',
+      ref: payload.ref,
+      text: payload.text,
+    })
+  }
+
+  if (request.command === 'action.press') {
+    const payload = request.payload as { tabId: number; key: string }
+    return runActionOnTab(payload.tabId, context, {
+      type: 'tabbridge.press',
+      tabId: payload.tabId,
+      key: payload.key,
+    })
+  }
+
+  if (request.command === 'action.scroll') {
+    const payload = request.payload as { tabId: number; dx?: number; dy?: number }
+    return runActionOnTab(payload.tabId, context, {
+      type: 'tabbridge.scroll',
+      tabId: payload.tabId,
+      dx: payload.dx ?? 0,
+      dy: payload.dy ?? 0,
+    })
+  }
+
+  if (request.command === 'action.clickCoordinates') {
+    const payload = request.payload as { tabId: number; x: number; y: number }
+    const confirm = createCoordinateActionApproval(payload.tabId, 'click-coordinates', `Click coordinates (${payload.x}, ${payload.y})`)
+    if (confirm) return confirm
+    return runActionOnTab(payload.tabId, context, {
+      type: 'tabbridge.clickCoordinates',
+      tabId: payload.tabId,
+      x: payload.x,
+      y: payload.y,
+    })
+  }
+
+  if (request.command === 'action.dragCoordinates') {
+    const payload = request.payload as { tabId: number; fromX: number; fromY: number; toX: number; toY: number }
+    const confirm = createCoordinateActionApproval(payload.tabId, 'drag-coordinates', `Drag coordinates from (${payload.fromX}, ${payload.fromY}) to (${payload.toX}, ${payload.toY})`)
+    if (confirm) return confirm
+    return runActionOnTab(payload.tabId, context, {
+      type: 'tabbridge.dragCoordinates',
+      tabId: payload.tabId,
+      fromX: payload.fromX,
+      fromY: payload.fromY,
+      toX: payload.toX,
+      toY: payload.toY,
+    })
+  }
+
   return errorEnvelope({
     code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE',
     message: `Command ${request.command} is not implemented by the extension command router yet.`,
     recoverable: false,
   })
+}
+
+async function runActionOnTab(tabId: number, context: CommandContext | undefined, message: unknown): Promise<CliEnvelope<unknown>> {
+  if (!context?.sendMessageToTab || !context?.getTab) {
+    return errorEnvelope({ code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE', message: 'Action messaging is not available.', recoverable: false })
+  }
+  const tab = await context.getTab(tabId)
+  if (!tab?.url || grantStatusForTab(getGrants(), { tabId, url: tab.url }, Date.now()) !== 'authorized') {
+    return errorEnvelope(tabNotAuthorizedError(tabId))
+  }
+  try {
+    const result = await context.sendMessageToTab(tabId, message)
+    if (result && typeof result === 'object' && 'ok' in result && result.ok === true && 'data' in result) {
+      return okEnvelope(result.data)
+    }
+    if (result && typeof result === 'object' && 'ok' in result && result.ok === false && 'error' in result) {
+      const errorData = result.error as { code: string; message: string; recoverable: boolean; suggestedCommand?: string }
+      const error = {
+        code: errorData.code as TabBridgeErrorCode,
+        message: errorData.message,
+        recoverable: errorData.recoverable,
+      }
+      if (errorData.suggestedCommand) {
+        Object.assign(error, { suggestedCommand: errorData.suggestedCommand })
+      }
+      return errorEnvelope(error)
+    }
+    return errorEnvelope({ code: 'BROWSER_COMMAND_TIMEOUT', message: 'Unexpected response from content script.', recoverable: true })
+  } catch {
+    return errorEnvelope(tabNotAuthorizedError(tabId))
+  }
+}
+
+function createCoordinateActionApproval(tabId: number, command: string, description: string): CliEnvelope<never> | undefined {
+  const result = approvalStore.createHighRiskActionApproval({
+    tabId,
+    domain: 'current-tab',
+    command,
+    description,
+    riskReasons: ['coordinate action cannot be tied to a stable semantic ref'],
+    payloadSummary: '[COORDINATES_REDACTED]',
+  })
+  return result.envelope
 }
 
 // Backward-compatible wrapper for existing JSON-RPC router and tests
@@ -252,6 +441,14 @@ export async function routeBridgeMethod(method: string, _params: unknown): Promi
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (!tab) return undefined
       return listRedactedTabs([toChromeTabLike(tab)], getGrants(), Date.now())[0]
+    },
+    async getTab(tabId: number) {
+      try {
+        const tab = await chrome.tabs.get(tabId)
+        return toChromeTabLike(tab)
+      } catch {
+        return undefined
+      }
     },
   }
 
