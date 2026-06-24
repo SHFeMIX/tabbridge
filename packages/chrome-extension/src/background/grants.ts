@@ -1,4 +1,18 @@
-import { originFromUrl, type AccessStatus, type SiteGrant } from '@tabbridge/shared'
+import { createSiteGrant, originFromUrl, type AccessStatus, type SiteGrant } from '@tabbridge/shared'
+
+let grants: SiteGrant[] = []
+
+export function getGrants(): SiteGrant[] {
+  return grants
+}
+
+export function setGrants(newGrants: SiteGrant[]): void {
+  grants = newGrants
+}
+
+export function addGrant(grant: SiteGrant): void {
+  grants = [...grants, grant]
+}
 
 export function grantStatusForTab(grants: SiteGrant[], tab: { tabId: number; url?: string }, now: number): AccessStatus {
   if (!tab.url) return 'none'

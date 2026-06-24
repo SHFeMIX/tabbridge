@@ -1,7 +1,8 @@
 import { errorEnvelope, okEnvelope, tabNotAuthorizedError, type BridgeRequest, type CliEnvelope, type TabBridgeErrorCode } from '@tabbridge/shared'
-import { listRedactedTabs } from './tabs'
-import { createScreenshotController } from './screenshot'
 import { ExtensionActionQueue } from './action-queue'
+import { createScreenshotController } from './screenshot'
+import { getGrants, setGrants, releaseGrant } from './grants'
+import { listRedactedTabs } from './tabs'
 import type { SiteGrant } from '@tabbridge/shared'
 
 const screenshotController = createScreenshotController(() => Date.now())
@@ -16,16 +17,6 @@ export type CommandContext = {
 }
 
 const actionQueue = new ExtensionActionQueue()
-
-let grants: SiteGrant[] = []
-
-export function getGrants(): SiteGrant[] {
-  return grants
-}
-
-export function setGrants(newGrants: SiteGrant[]): void {
-  grants = newGrants
-}
 
 export async function waitMs(ms: number): Promise<{ waitedMs: number }> {
   await new Promise((resolve) => setTimeout(resolve, ms))
@@ -255,12 +246,12 @@ export async function routeBridgeMethod(method: string, _params: unknown): Promi
   const context: CommandContext = {
     async listTabs() {
       const chromeTabs = await chrome.tabs.query({})
-      return listRedactedTabs(chromeTabs.map(toChromeTabLike), grants, Date.now())
+      return listRedactedTabs(chromeTabs.map(toChromeTabLike), getGrants(), Date.now())
     },
     async currentTab() {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (!tab) return undefined
-      return listRedactedTabs([toChromeTabLike(tab)], grants, Date.now())[0]
+      return listRedactedTabs([toChromeTabLike(tab)], getGrants(), Date.now())[0]
     },
   }
 
