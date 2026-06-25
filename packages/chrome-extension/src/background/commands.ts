@@ -468,6 +468,16 @@ export async function routeBridgeMethod(method: string, _params: unknown): Promi
     },
   }
 
+  if (method === 'snapshot') {
+    context.sendMessageToTab = async (tabId: number, message: unknown) => {
+      const tab = await context.getTab?.(tabId)
+      if (!tab?.url || grantStatusForTab(getGrants(), { tabId, url: tab.url }, Date.now()) !== 'authorized') {
+        throw tabNotAuthorizedError(tabId)
+      }
+      return await chrome.tabs.sendMessage(tabId, message)
+    }
+  }
+
   const envelope = await routeBridgeCommand(request, context)
   if (envelope.ok) return envelope.data
   throw envelope.error
