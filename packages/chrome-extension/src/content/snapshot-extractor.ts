@@ -1,4 +1,8 @@
 import { classifyRisk, displayRef, domainFromUrl, type ElementRefRecord, type PageSnapshot, type Rect, type SnapshotElement } from '@tabbridge/shared'
+import { computeElementState, stateLabels } from './element-state'
+import { fingerprintElement } from './element-fingerprint'
+import { matchElementIdentity } from './identity-matcher'
+import { createIdentityHash, createStableRef } from './stable-ref'
 
 export type ExtractSnapshotInput = {
   tabId: number
@@ -7,6 +11,7 @@ export type ExtractSnapshotInput = {
   url: string
   includeUrl: boolean
   now: number
+  previousRecords?: ElementRefRecord[]
 }
 
 export type ExtractSnapshotResult = {
@@ -26,13 +31,12 @@ const INTERACTABLE_SELECTOR = [
   '[role="textbox"]',
   '[role="checkbox"]',
   '[role="radio"]',
+  '[role="combobox"]',
+  '[role="dialog"]',
+  'dialog',
+  '[aria-modal="true"]',
   '[onclick]',
 ].join(',')
-
-function rectFor(element: Element): Rect {
-  const rect = element.getBoundingClientRect()
-  return [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)]
-}
 
 function isVisible(element: Element): boolean {
   const htmlElement = element as HTMLElement
@@ -43,76 +47,82 @@ function isVisible(element: Element): boolean {
   return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 0 && rect.height >= 0
 }
 
-function roleFor(element: Element): string {
-  const explicit = element.getAttribute('role')
-  if (explicit) return explicit
-  const tag = element.tagName.toLowerCase()
-  if (tag === 'a') return 'link'
-  if (tag === 'button') return 'button'
-  if (tag === 'input' || tag === 'textarea') return 'textbox'
-  if (tag === 'select') return 'combobox'
-  return 'button'
+function rectFor(element: Element): Rect {
+  const rect = element.getBoundingClientRect()
+  return [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)]
 }
 
-function nameFor(element: Element): string {
-  const aria = element.getAttribute('aria-label')
-  if (aria) return aria.trim()
-  const title = element.getAttribute('title')
-  if (title) return title.trim()
-  const text = element.textContent?.replace(/\s+/g, ' ').trim()
-  if (text) return text.slice(0, 120)
-  const placeholder = element.getAttribute('placeholder')
-  if (placeholder) return placeholder.trim()
-  return roleFor(element)
+function textFor(element: Element, accessibleName: string): string {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) return ''
+  return element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 160) || accessibleName
 }
 
-function cssEscape(value: string): string {
-  if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value)
-  return value.replace(/([!"#$%&'()*+,.\/;<=>?@[\\\]^`{|}~])/g, '\\$1')
-}
-
-function selectorFor(element: Element): string[] {
-  if (element.id) return [`#${cssEscape(element.id)}`]
-  const tag = element.tagName.toLowerCase()
-  const aria = element.getAttribute('aria-label')
-  if (aria) return [`${tag}[aria-label="${cssEscape(aria)}"]`]
-  return [tag]
-}
-
-function xpathFor(element: Element): string[] {
-  if (element.id) return [`//*[@id="${element.id}"]`]
-  return [`//${element.tagName.toLowerCase()}`]
+function uniqueRef(baseRef: string, usedRefs: Set<string>, collisionIndex: number): string {
+  if (!usedRefs.has(baseRef)) return baseRef
+  const derivedHash = createIdentityHash({
+    role: 'ref-collision',
+    accessibleName: baseRef,
+    domSignature: String(collisionIndex),
+    keyAttributes: {},
+  })
+  return createStableRef(derivedHash)
 }
 
 export function extractSnapshotFromDocument(input: ExtractSnapshotInput): ExtractSnapshotResult {
   const elements = Array.from(document.querySelectorAll(INTERACTABLE_SELECTOR)).filter(isVisible)
   const records: ElementRefRecord[] = []
   const tree: SnapshotElement[] = []
+  const previousRecords = input.previousRecords ?? []
+  const usedRefs = new Set<string>()
+  let collisionIndex = 0
 
-  elements.forEach((element, index) => {
-    const role = roleFor(element)
-    const name = nameFor(element)
-    const text = element.tagName.toLowerCase() === 'input' ? '' : (element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 160) ?? '')
+  for (const element of elements) {
+    const fingerprint = fingerprintElement(element)
+    const availablePreviousRecords = previousRecords.filter((record) => !usedRefs.has(record.ref))
+    const decision = matchElementIdentity(availablePreviousRecords, fingerprint)
+    const baseRef = decision.kind === 'reuse' ? decision.ref : createStableRef(decision.identityHash)
+    const ref = uniqueRef(baseRef, usedRefs, collisionIndex)
+    if (ref !== baseRef) collisionIndex += 1
+    usedRefs.add(ref)
+    const text = textFor(element, fingerprint.accessibleName)
     const inputType = element.getAttribute('type') ?? undefined
-    const risk = classifyRisk({ command: 'snapshot', role, name, text, inputType, usesCoordinates: false })
-    const ref = displayRef(`e${index + 1}`)
+    const risk = classifyRisk({ command: 'snapshot', role: fingerprint.role, name: fingerprint.accessibleName, text, inputType, usesCoordinates: false })
+    const states = computeElementState(element)
+    const labels = stateLabels(states)
     const box = rectFor(element)
 
-    tree.push({ ref, role, name, text, states: ['enabled'], box, risk: risk.risk })
-    records.push({
+    tree.push({
+      ref,
+      role: fingerprint.role,
+      name: fingerprint.accessibleName,
+      accessibleName: fingerprint.accessibleName,
+      text,
+      states: labels,
+      box,
+      risk: risk.risk,
+      identityHash: fingerprint.identityHash,
+    })
+    const record: ElementRefRecord = {
       snapshotId: input.snapshotId,
       tabId: input.tabId,
       frameRef: 'f0',
-      ref,
-      selectorCandidates: selectorFor(element),
-      xpathCandidates: xpathFor(element),
-      role,
-      name,
-      textFingerprint: text || name,
+      ref: displayRef(ref),
+      identityHash: fingerprint.identityHash,
+      role: fingerprint.role,
+      accessibleName: fingerprint.accessibleName,
+      name: fingerprint.accessibleName,
+      textFingerprint: fingerprint.textFingerprint,
+      domSignature: fingerprint.domSignature,
+      keyAttributes: fingerprint.keyAttributes,
+      states,
       boundingBox: box,
+      selectorCandidates: [],
+      xpathCandidates: [],
       generatedAt: input.now,
-    })
-  })
+    }
+    if (fingerprint.formContext) record.formContext = fingerprint.formContext
+    records.push(record)
+  }
 
   let origin: string
   try {

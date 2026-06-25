@@ -1,6 +1,7 @@
 import { HTML_DEFAULT_MAX_BYTES, TEXT_DEFAULT_MAX_BYTES, errorEnvelope, refStaleError } from '@tabbridge/shared'
 import { executeRefAction } from '../content/actions'
-import { readVisibleText, sanitizeElementHtml } from '../content/bounded-read'
+import { readVisibleText } from '../content/bounded-read'
+import { readRefHtml } from '../content/ref-html'
 import { RefStore } from '../content/ref-store'
 import { extractSnapshotFromDocument } from '../content/snapshot-extractor'
 import { unsupportedPageReason } from '../content/unsupported-pages'
@@ -19,15 +20,18 @@ export default defineContentScript({
           return true
         }
 
+        const now = Date.now()
+        const previousRecords = refStore.getPreviousCandidates(message.tabId, 'f0', now)
         const result = extractSnapshotFromDocument({
           tabId: message.tabId,
           snapshotId: message.snapshotId,
           title: document.title,
           url: window.location.href,
           includeUrl: Boolean(message.includeUrl),
-          now: Date.now(),
+          now,
+          previousRecords,
         })
-        refStore.saveSnapshot(message.snapshotId, result.records, Date.now())
+        refStore.saveSnapshot(message.snapshotId, result.records, now, message.tabId)
         sendResponse({ ok: true, data: result.snapshot })
         return true
       }
@@ -38,17 +42,15 @@ export default defineContentScript({
       }
 
       if (message?.type === 'tabbridge.html') {
-        const record = refStore.getRecord(message.snapshotId, message.frameRef ?? 'f0', message.ref, Date.now())
-        if (!record) {
+        const now = Date.now()
+        const record = refStore.getLatestRecord(message.tabId, message.frameRef ?? 'f0', message.ref, now)
+          ?? refStore.getRecord(message.snapshotId, message.frameRef ?? 'f0', message.ref, now)
+        const result = record ? readRefHtml(record, message.maxBytes ?? HTML_DEFAULT_MAX_BYTES) : undefined
+        if (!result) {
           sendResponse(errorEnvelope(refStaleError(message.tabId)))
           return true
         }
-        const element = record.selectorCandidates.map((selector) => document.querySelector(selector)).find(Boolean)
-        if (!element) {
-          sendResponse(errorEnvelope(refStaleError(message.tabId)))
-          return true
-        }
-        sendResponse({ ok: true, data: sanitizeElementHtml(element, message.maxBytes ?? HTML_DEFAULT_MAX_BYTES) })
+        sendResponse({ ok: true, data: result })
         return true
       }
 
