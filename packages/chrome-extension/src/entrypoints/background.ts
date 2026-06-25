@@ -2,7 +2,7 @@ import { createSiteGrant } from '@tabbridge/shared'
 import { defineBackground } from 'wxt/utils/define-background'
 import type { JsonRpcRequest, JsonRpcResponse } from '@tabbridge/shared'
 import { approvalStore } from '../background/approvals'
-import { addGrant } from '../background/grants'
+import { addGrant, hydrateGrants } from '../background/grants'
 import { routeJsonRpcRequest } from '../background/jsonrpc-router'
 
 const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html'
@@ -55,6 +55,8 @@ async function handlePopupMessage(message: unknown): Promise<unknown> {
 }
 
 export default defineBackground(() => {
+  void hydrateGrants()
+  void approvalStore.hydrate()
   void ensureOffscreenDocument()
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

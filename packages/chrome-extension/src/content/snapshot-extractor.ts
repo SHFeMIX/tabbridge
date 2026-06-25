@@ -121,7 +121,7 @@ export function extractSnapshotFromDocument(input: ExtractSnapshotInput): Extrac
     origin = domainFromUrl(input.url)
   }
 
-  const snapshot: PageSnapshot = {
+  const snapshotBase = {
     tabId: input.tabId,
     snapshotId: input.snapshotId,
     title: input.title,
@@ -133,9 +133,11 @@ export function extractSnapshotFromDocument(input: ExtractSnapshotInput): Extrac
       scrollY: window.scrollY,
     },
     frames: [{ frameRef: 'f0', origin, accessible: true, tree }],
-    urlVisible: input.includeUrl,
-    ...(input.includeUrl ? { url: input.url } : {}),
-  } as PageSnapshot
+  }
+
+  const snapshot: PageSnapshot = input.includeUrl
+    ? { ...snapshotBase, urlVisible: true, url: input.url }
+    : { ...snapshotBase, urlVisible: false }
 
   return { snapshot, records }
 }

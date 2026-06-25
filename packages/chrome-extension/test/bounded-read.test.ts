@@ -8,6 +8,11 @@ describe('bounded reads', () => {
     expect(readVisibleText(document, 11)).toEqual({ ok: true, text: 'Hello visib', truncated: true })
   })
 
+  it('limits visible text by byte count without splitting multi-byte characters', () => {
+    document.body.innerHTML = '<main><p>🙂🙂a</p></main>'
+    expect(readVisibleText(document, 8)).toEqual({ ok: true, text: '🙂🙂', truncated: true })
+  })
+
   it('sanitizes html by removing scripts, styles, hidden inputs, and form values', () => {
     const wrapper = document.createElement('div')
     wrapper.innerHTML = '<form><input value="secret"><input type="hidden" value="token"><script>secret()</script><style>.x{}</style><button>Send</button></form>'

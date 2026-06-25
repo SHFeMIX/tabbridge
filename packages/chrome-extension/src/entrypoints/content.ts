@@ -9,6 +9,7 @@ const refStore = new RefStore()
 
 export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
+  registration: 'runtime',
   main() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message?.type === 'tabbridge.snapshot') {
@@ -111,20 +112,26 @@ export default defineContentScript({
       }
 
       if (message?.type === 'tabbridge.waitForText') {
-        const started = Date.now()
         const timeoutMs = message.timeoutMs ?? 30_000
-        const poll = () => {
-          if ((document.body.textContent ?? '').includes(message.text)) {
-            sendResponse({ ok: true, data: { found: true, text: message.text } })
-            return
-          }
-          if (Date.now() - started >= timeoutMs) {
-            sendResponse({ ok: true, data: { found: false, text: message.text } })
-            return
-          }
-          setTimeout(poll, 50)
+        let done = false
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
+        let observer: MutationObserver | undefined
+        const finish = (found: boolean) => {
+          if (done) return
+          done = true
+          if (timeoutId) clearTimeout(timeoutId)
+          observer?.disconnect()
+          sendResponse({ ok: true, data: { found, text: message.text } })
         }
-        poll()
+        const check = () => {
+          if ((document.body.textContent ?? '').includes(message.text)) {
+            finish(true)
+          }
+        }
+        observer = new MutationObserver(check)
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+        timeoutId = setTimeout(() => finish(false), timeoutMs)
+        check()
         return true
       }
 
