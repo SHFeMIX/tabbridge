@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ERROR_CODES, bridgeNotConnectedError, refStaleError, tabNotAuthorizedError, tabBridgeErrorToJsonRpc, jsonRpcErrorToTabBridgeError } from '../src/index.js'
+import { ERROR_CODES, bridgeNotConnectedError, refStaleError, snapshotRequiredError, tabNotAuthorizedError, tabBridgeErrorToJsonRpc, jsonRpcErrorToTabBridgeError } from '../src/index.js'
 
 describe('TabBridge errors', () => {
   it('exports the exact MVP error code set', () => {
@@ -17,6 +17,7 @@ describe('TabBridge errors', () => {
       'UNSUPPORTED_PAGE',
       'FRAME_NOT_ACCESSIBLE',
       'FRAME_ORIGIN_NOT_AUTHORIZED',
+      'SNAPSHOT_REQUIRED',
       'REF_STALE',
       'ELEMENT_NOT_VISIBLE',
       'ELEMENT_DISABLED',
@@ -40,12 +41,25 @@ describe('TabBridge errors', () => {
     })
   })
 
-  it('suggests a new snapshot for stale refs', () => {
-    expect(refStaleError(123)).toEqual({
-      code: 'REF_STALE',
-      message: 'The element reference is stale. Take a new snapshot and retry with a ref from that snapshot.',
+  it('includes SNAPSHOT_REQUIRED in the public error code list', () => {
+    expect(ERROR_CODES).toContain('SNAPSHOT_REQUIRED')
+  })
+
+  it('suggests interactive snapshot when a snapshot is required', () => {
+    expect(snapshotRequiredError()).toEqual({
+      code: 'SNAPSHOT_REQUIRED',
+      message: 'Run tabbridge snapshot -i before using @refs.',
       recoverable: true,
-      suggestedCommand: 'tabbridge snapshot --tab 123 --json',
+      suggestedCommand: 'tabbridge snapshot -i',
+    })
+  })
+
+  it('suggests interactive snapshot for stale refs', () => {
+    expect(refStaleError(undefined, '@e1')).toEqual({
+      code: 'REF_STALE',
+      message: 'Ref @e1 is not available in the latest snapshot. Run tabbridge snapshot -i again.',
+      recoverable: true,
+      suggestedCommand: 'tabbridge snapshot -i',
     })
   })
 

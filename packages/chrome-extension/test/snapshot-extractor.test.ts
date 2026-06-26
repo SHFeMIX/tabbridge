@@ -2,61 +2,38 @@
 import { describe, expect, it } from 'vitest'
 import { extractSnapshotFromDocument } from '../src/content/snapshot-extractor'
 
-describe('semantic snapshot extractor', () => {
-  it('extracts semantic interactables with stable identity fields and no input value leakage', () => {
-    document.body.innerHTML = '<main><button id="merge">Merge pull request</button><input type="checkbox" aria-label="Confirm" checked><input aria-label="Comment" value="secret typed value"><a href="/settings">Settings</a><span>Plain text</span></main>'
+describe('agent interactive snapshot extractor', () => {
+  it('extracts volatile @e refs with compact text and no input value leakage', () => {
+    document.body.innerHTML = '<main><button id="merge">Merge pull request</button><input type="checkbox" aria-label="Confirm" checked><input aria-label="Comment" placeholder="Leave a comment" value="secret typed value"><a href="/settings">Settings</a><span>Plain text</span></main>'
 
     const result = extractSnapshotFromDocument({
       tabId: 123,
-      snapshotId: 'snap_1',
       title: 'GitHub Pull Request',
       url: 'https://github.com/acme/repo/pull/1',
-      includeUrl: false,
       now: 1782010000000,
     })
 
-    expect(result.snapshot).toMatchObject({ tabId: 123, snapshotId: 'snap_1', title: 'GitHub Pull Request', domain: 'github.com', urlVisible: false })
-    expect(result.snapshot.frames[0]?.tree).toEqual([
-      expect.objectContaining({ role: 'button', name: 'Merge pull request', accessibleName: 'Merge pull request', risk: 'high' }),
-      expect.objectContaining({ role: 'checkbox', name: 'Confirm', states: expect.arrayContaining(['checked']) }),
-      expect.objectContaining({ role: 'textbox', name: 'Comment', risk: 'low' }),
-      expect.objectContaining({ role: 'link', name: 'Settings', risk: 'low' }),
+    expect(result.snapshot.page).toEqual({ title: 'GitHub Pull Request', url: 'https://github.com/acme/repo/pull/1' })
+    expect(result.snapshot.refs).toEqual([
+      expect.objectContaining({ ref: '@e1', role: 'button', name: 'Merge pull request', text: 'Merge pull request' }),
+      expect.objectContaining({ ref: '@e2', role: 'checkbox', name: 'Confirm', text: '', attributes: expect.objectContaining({ type: 'checkbox' }) }),
+      expect.objectContaining({ ref: '@e3', role: 'textbox', name: 'Comment', text: '', attributes: expect.objectContaining({ placeholder: 'Leave a comment' }) }),
+      expect.objectContaining({ ref: '@e4', role: 'link', name: 'Settings', text: 'Settings', attributes: expect.objectContaining({ href: '/settings' }) }),
     ])
-    for (const element of result.snapshot.frames[0]?.tree ?? []) {
-      expect(element.ref).toMatch(/^@r_[a-f0-9]{12}$/)
-      expect(element.identityHash).toMatch(/^[a-f0-9]{12}$/)
-    }
+    expect(result.snapshot.text).toContain('@e1 [button] "Merge pull request"')
+    expect(result.snapshot.text).toContain('@e3 [textbox] placeholder="Leave a comment"')
     expect(JSON.stringify(result.snapshot)).not.toContain('secret typed value')
-    expect(result.records[0]?.selectorCandidates).toEqual([])
-    expect(result.records[0]?.xpathCandidates).toEqual([])
+    expect(result.records.map((record) => record.ref)).toEqual(['@e1', '@e2', '@e3', '@e4'])
   })
 
-  it('keeps refs stable across DOM insertion and reorder when previous records are supplied', () => {
+  it('assigns refs fresh by document order on every snapshot', () => {
     document.body.innerHTML = '<main><button>Save</button><button>Delete</button></main>'
-    const first = extractSnapshotFromDocument({ tabId: 1, snapshotId: 'snap_1', title: 'App', url: 'https://example.com', includeUrl: false, now: 1000 })
-    const saveRef = first.snapshot.frames[0]?.tree?.find((element) => element.name === 'Save')?.ref
-    const deleteRef = first.snapshot.frames[0]?.tree?.find((element) => element.name === 'Delete')?.ref
+    const first = extractSnapshotFromDocument({ tabId: 1, title: 'App', url: 'https://example.com', now: 1000 })
 
     document.body.innerHTML = '<main><button>New banner</button><button>Delete</button><button>Save</button></main>'
-    const second = extractSnapshotFromDocument({ tabId: 1, snapshotId: 'snap_2', title: 'App', url: 'https://example.com', includeUrl: false, now: 2000, previousRecords: first.records })
+    const second = extractSnapshotFromDocument({ tabId: 1, title: 'App', url: 'https://example.com', now: 2000 })
 
-    expect(second.snapshot.frames[0]?.tree?.find((element) => element.name === 'Save')?.ref).toBe(saveRef)
-    expect(second.snapshot.frames[0]?.tree?.find((element) => element.name === 'Delete')?.ref).toBe(deleteRef)
-    expect(second.snapshot.frames[0]?.tree?.find((element) => element.name === 'New banner')?.ref).toMatch(/^@r_[a-f0-9]{12}$/)
-  })
-
-  it('assigns distinct refs to same-semantic duplicate elements in one snapshot and reuses them once allocated', () => {
-    document.body.innerHTML = '<main><button>Save</button><button>Save</button></main>'
-
-    const first = extractSnapshotFromDocument({ tabId: 1, snapshotId: 'snap_1', title: 'App', url: 'https://example.com', includeUrl: false, now: 1000 })
-    const firstRefs = first.snapshot.frames[0]?.tree?.map((element) => element.ref) ?? []
-
-    document.body.innerHTML = '<main><button>Save</button><button>Save</button></main>'
-    const second = extractSnapshotFromDocument({ tabId: 1, snapshotId: 'snap_2', title: 'App', url: 'https://example.com', includeUrl: false, now: 2000, previousRecords: first.records })
-    const secondRefs = second.snapshot.frames[0]?.tree?.map((element) => element.ref) ?? []
-
-    expect(firstRefs).toHaveLength(2)
-    expect(new Set(firstRefs).size).toBe(2)
-    expect(secondRefs).toEqual(firstRefs)
+    expect(first.snapshot.refs.map((element) => [element.ref, element.name])).toEqual([['@e1', 'Save'], ['@e2', 'Delete']])
+    expect(second.snapshot.refs.map((element) => [element.ref, element.name])).toEqual([['@e1', 'New banner'], ['@e2', 'Delete'], ['@e3', 'Save']])
   })
 })

@@ -82,7 +82,7 @@ describe('ensure-broker helpers', () => {
 
     const result = await ensureBroker({
       brokerEntryExists: async () => true,
-      waitTimeoutMs: 1,
+      waitTimeoutMs: 50,
       waitIntervalMs: 1,
     })
 

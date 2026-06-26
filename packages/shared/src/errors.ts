@@ -12,6 +12,7 @@ export const ERROR_CODES = [
   'UNSUPPORTED_PAGE',
   'FRAME_NOT_ACCESSIBLE',
   'FRAME_ORIGIN_NOT_AUTHORIZED',
+  'SNAPSHOT_REQUIRED',
   'REF_STALE',
   'ELEMENT_NOT_VISIBLE',
   'ELEMENT_DISABLED',
@@ -48,12 +49,22 @@ export function tabNotAuthorizedError(tabId: number): TabBridgeError {
   }
 }
 
-export function refStaleError(tabId: number): TabBridgeError {
+export function snapshotRequiredError(): TabBridgeError {
+  return {
+    code: 'SNAPSHOT_REQUIRED',
+    message: 'Run tabbridge snapshot -i before using @refs.',
+    recoverable: true,
+    suggestedCommand: 'tabbridge snapshot -i',
+  }
+}
+
+export function refStaleError(_tabId?: number, ref?: string): TabBridgeError {
+  const subject = ref ? `Ref ${ref}` : 'The element reference'
   return {
     code: 'REF_STALE',
-    message: 'The element reference is stale. Take a new snapshot and retry with a ref from that snapshot.',
+    message: `${subject} is not available in the latest snapshot. Run tabbridge snapshot -i again.`,
     recoverable: true,
-    suggestedCommand: `tabbridge snapshot --tab ${tabId} --json`,
+    suggestedCommand: 'tabbridge snapshot -i',
   }
 }
 

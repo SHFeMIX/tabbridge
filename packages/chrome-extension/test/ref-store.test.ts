@@ -6,10 +6,10 @@ const states = { disabled: false, checked: false, selected: false, expanded: fal
 
 function record(overrides: Partial<ElementRefRecord>): ElementRefRecord {
   return {
-    snapshotId: 'snap_1',
+    snapshotId: 'latest',
     tabId: 1,
     frameRef: 'f0',
-    ref: '@r_save',
+    ref: '@e1',
     identityHash: 'hash-save',
     role: 'button',
     accessibleName: 'Save',
@@ -25,51 +25,39 @@ function record(overrides: Partial<ElementRefRecord>): ElementRefRecord {
 }
 
 describe('RefStore', () => {
-  it('supports snapshot lookup and latest ref lookup', () => {
+  it('stores only the latest ref map for a tab', () => {
     const store = new RefStore()
-    store.saveSnapshot('snap_1', [record({})], 1000)
+    store.saveLatest(1, [record({ ref: '@e1', accessibleName: 'Save' })], 1000)
+    store.saveLatest(1, [record({ ref: '@e1', accessibleName: 'Delete', name: 'Delete' })], 2000)
 
-    expect(store.getRecord('snap_1', 'f0', '@r_save', 2000)?.accessibleName).toBe('Save')
-    expect(store.getLatestRecord(1, 'f0', '@r_save', 2000)?.accessibleName).toBe('Save')
-    expect(store.getPreviousCandidates(1, 'f0', 2000)).toHaveLength(1)
+    expect(store.hasLatestSnapshot(1, 2001)).toBe(true)
+    expect(store.getLatestRecord(1, 'f0', '@e1', 2001)?.accessibleName).toBe('Delete')
+    expect(store.getLatestRecord(1, 'f0', '@e2', 2001)).toBeUndefined()
   })
 
-  it('expires snapshot records latest records and previous candidates after TTL', () => {
+  it('expires the latest ref map after TTL', () => {
     const store = new RefStore()
-    store.saveSnapshot('snap_1', [record({})], 1000)
+    store.saveLatest(1, [record({})], 1000)
 
-    expect(store.getRecord('snap_1', 'f0', '@r_save', 62001)).toBeUndefined()
-    expect(store.getLatestRecord(1, 'f0', '@r_save', 62001)).toBeUndefined()
-    expect(store.getPreviousCandidates(1, 'f0', 62001)).toEqual([])
-  })
-
-  it('keeps only the latest three snapshots per tab without deleting latest identity for reused refs', () => {
-    const store = new RefStore()
-    for (let index = 1; index <= 4; index += 1) {
-      store.saveSnapshot(`snap_${index}`, [record({ snapshotId: `snap_${index}`, generatedAt: index, accessibleName: `Save ${index}`, name: `Save ${index}` })], index)
-    }
-
-    expect(store.getRecord('snap_1', 'f0', '@r_save', 10)).toBeUndefined()
-    expect(store.getRecord('snap_4', 'f0', '@r_save', 10)?.accessibleName).toBe('Save 4')
-    expect(store.getLatestRecord(1, 'f0', '@r_save', 10)?.accessibleName).toBe('Save 4')
+    expect(store.hasLatestSnapshot(1, 62001)).toBe(false)
+    expect(store.getLatestRecord(1, 'f0', '@e1', 62001)).toBeUndefined()
   })
 
   it('clears latest records when a tab saves an empty snapshot', () => {
     const store = new RefStore()
-    store.saveSnapshot('snap_1', [record({})], 1000)
-    store.saveSnapshot('snap_2', [], 2000, 1)
+    store.saveLatest(1, [record({})], 1000)
+    store.saveLatest(1, [], 2000)
 
-    expect(store.getLatestRecord(1, 'f0', '@r_save', 2001)).toBeUndefined()
-    expect(store.getPreviousCandidates(1, 'f0', 2001)).toEqual([])
+    expect(store.hasLatestSnapshot(1, 2001)).toBe(true)
+    expect(store.getLatestRecord(1, 'f0', '@e1', 2001)).toBeUndefined()
   })
 
-  it('clears snapshot and latest indexes for a tab', () => {
+  it('clears latest indexes for a tab', () => {
     const store = new RefStore()
-    store.saveSnapshot('snap_1', [record({})], 1000)
+    store.saveLatest(1, [record({})], 1000)
     store.clearForTab(1)
 
-    expect(store.getRecord('snap_1', 'f0', '@r_save', 1001)).toBeUndefined()
-    expect(store.getLatestRecord(1, 'f0', '@r_save', 1001)).toBeUndefined()
-    expect(store.getPreviousCandidates(1, 'f0', 1001)).toEqual([])
+    expect(store.hasLatestSnapshot(1, 1001)).toBe(false)
+    expect(store.getLatestRecord(1, 'f0', '@e1', 1001)).toBeUndefined()
   })
 })

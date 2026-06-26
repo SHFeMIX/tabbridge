@@ -1,21 +1,18 @@
-import { classifyRisk, displayRef, domainFromUrl, type ElementRefRecord, type PageSnapshot, type Rect, type SnapshotElement } from '@tabbridge/shared'
-import { computeElementState, stateLabels } from './element-state'
+import { displayRef, formatAgentSnapshotText, type AgentInteractiveSnapshot, type AgentSnapshotRef, type ElementRefRecord, type Rect } from '@tabbridge/shared'
+import { computeElementState } from './element-state'
 import { fingerprintElement } from './element-fingerprint'
-import { matchElementIdentity } from './identity-matcher'
-import { createIdentityHash, createStableRef } from './stable-ref'
 
 export type ExtractSnapshotInput = {
   tabId: number
-  snapshotId: string
+  snapshotId?: string
   title: string
   url: string
-  includeUrl: boolean
+  includeUrl?: boolean
   now: number
-  previousRecords?: ElementRefRecord[]
 }
 
 export type ExtractSnapshotResult = {
-  snapshot: PageSnapshot
+  snapshot: AgentInteractiveSnapshot
   records: ElementRefRecord[]
 }
 
@@ -42,8 +39,6 @@ function isVisible(element: Element): boolean {
   const htmlElement = element as HTMLElement
   const style = window.getComputedStyle(htmlElement)
   const rect = htmlElement.getBoundingClientRect()
-  // Use >= 0 so jsdom tests without layout can still discover elements.
-  // In a real Chrome tab, getBoundingClientRect reflects actual visibility.
   return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 0 && rect.height >= 0
 }
 
@@ -57,56 +52,52 @@ function textFor(element: Element, accessibleName: string): string {
   return element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 160) || accessibleName
 }
 
-function uniqueRef(baseRef: string, usedRefs: Set<string>, collisionIndex: number): string {
-  if (!usedRefs.has(baseRef)) return baseRef
-  const derivedHash = createIdentityHash({
-    role: 'ref-collision',
-    accessibleName: baseRef,
-    domSignature: String(collisionIndex),
-    keyAttributes: {},
-  })
-  return createStableRef(derivedHash)
+function pathOnly(value: string): string {
+  try {
+    return new URL(value, window.location.href).pathname
+  } catch {
+    return value.split('?')[0]?.split('#')[0] ?? value
+  }
+}
+
+function attributesFor(element: Element): Record<string, string> {
+  const attributes: Record<string, string> = {}
+  const type = element.getAttribute('type')
+  const placeholder = element.getAttribute('placeholder')
+  const ariaLabel = element.getAttribute('aria-label')
+  const href = element.getAttribute('href')
+  if (type) attributes.type = type
+  if (placeholder) attributes.placeholder = placeholder
+  if (ariaLabel) attributes['aria-label'] = ariaLabel
+  if (href) attributes.href = pathOnly(href)
+  return attributes
 }
 
 export function extractSnapshotFromDocument(input: ExtractSnapshotInput): ExtractSnapshotResult {
   const elements = Array.from(document.querySelectorAll(INTERACTABLE_SELECTOR)).filter(isVisible)
   const records: ElementRefRecord[] = []
-  const tree: SnapshotElement[] = []
-  const previousRecords = input.previousRecords ?? []
-  const usedRefs = new Set<string>()
-  let collisionIndex = 0
+  const refs: AgentSnapshotRef[] = []
 
-  for (const element of elements) {
+  elements.forEach((element, index) => {
     const fingerprint = fingerprintElement(element)
-    const availablePreviousRecords = previousRecords.filter((record) => !usedRefs.has(record.ref))
-    const decision = matchElementIdentity(availablePreviousRecords, fingerprint)
-    const baseRef = decision.kind === 'reuse' ? decision.ref : createStableRef(decision.identityHash)
-    const ref = uniqueRef(baseRef, usedRefs, collisionIndex)
-    if (ref !== baseRef) collisionIndex += 1
-    usedRefs.add(ref)
+    const ref = displayRef(`e${index + 1}`)
     const text = textFor(element, fingerprint.accessibleName)
-    const inputType = element.getAttribute('type') ?? undefined
-    const risk = classifyRisk({ command: 'snapshot', role: fingerprint.role, name: fingerprint.accessibleName, text, inputType, usesCoordinates: false })
     const states = computeElementState(element)
-    const labels = stateLabels(states)
     const box = rectFor(element)
 
-    tree.push({
+    refs.push({
       ref,
       role: fingerprint.role,
       name: fingerprint.accessibleName,
-      accessibleName: fingerprint.accessibleName,
       text,
-      states: labels,
-      box,
-      risk: risk.risk,
-      identityHash: fingerprint.identityHash,
+      attributes: attributesFor(element),
     })
+
     const record: ElementRefRecord = {
-      snapshotId: input.snapshotId,
+      snapshotId: input.snapshotId ?? `latest_${input.now}`,
       tabId: input.tabId,
       frameRef: 'f0',
-      ref: displayRef(ref),
+      ref,
       identityHash: fingerprint.identityHash,
       role: fingerprint.role,
       accessibleName: fingerprint.accessibleName,
@@ -122,32 +113,13 @@ export function extractSnapshotFromDocument(input: ExtractSnapshotInput): Extrac
     }
     if (fingerprint.formContext) record.formContext = fingerprint.formContext
     records.push(record)
-  }
+  })
 
-  let origin: string
-  try {
-    origin = new URL(input.url).origin
-  } catch {
-    origin = domainFromUrl(input.url)
+  const snapshot: AgentInteractiveSnapshot = {
+    page: { title: input.title, url: input.url },
+    refs,
   }
-
-  const snapshotBase = {
-    tabId: input.tabId,
-    snapshotId: input.snapshotId,
-    title: input.title,
-    domain: domainFromUrl(input.url),
-    viewport: {
-      width: window.innerWidth,
-      height: window.innerHeight,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
-    },
-    frames: [{ frameRef: 'f0', origin, accessible: true, tree }],
-  }
-
-  const snapshot: PageSnapshot = input.includeUrl
-    ? { ...snapshotBase, urlVisible: true, url: input.url }
-    : { ...snapshotBase, urlVisible: false }
+  snapshot.text = formatAgentSnapshotText(snapshot)
 
   return { snapshot, records }
 }

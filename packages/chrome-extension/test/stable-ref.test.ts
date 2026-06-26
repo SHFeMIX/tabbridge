@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createIdentityHash, createStableRef } from '../src/content/stable-ref'
+import { createIdentityHash } from '../src/content/stable-ref'
+import * as identityHelpers from '../src/content/stable-ref'
 
-describe('stable refs', () => {
-  it('creates deterministic identity hashes independent of key attribute insertion order', () => {
+describe('internal element identity helpers', () => {
+  it('creates deterministic hashes independent of key attribute insertion order', () => {
     const first = createIdentityHash({
       role: 'button',
       accessibleName: 'Save changes',
@@ -20,6 +21,9 @@ describe('stable refs', () => {
 
     expect(first).toBe(second)
     expect(first).toMatch(/^[a-f0-9]{12}$/)
-    expect(createStableRef(first)).toBe(`@r_${first}`)
+  })
+
+  it('does not expose external stable refs for the vNext workflow', () => {
+    expect(identityHelpers).not.toHaveProperty('createStableRef')
   })
 })

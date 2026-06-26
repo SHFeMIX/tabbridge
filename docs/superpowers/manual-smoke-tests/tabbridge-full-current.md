@@ -2,7 +2,7 @@
 
 Date: 2026-06-26
 
-Run this checklist after automated tests pass. It verifies the current TabBridge product surface end to end: CLI, broker, Chrome extension, permissions, snapshots, stable refs, reads, actions, approvals, navigation, screenshots, and error recovery.
+Run this checklist after automated tests pass. It verifies the current TabBridge product surface end to end: CLI, broker, Chrome extension, permissions, snapshots, volatile refs, reads, actions, approvals, navigation, screenshots, and error recovery.
 
 ## 0. Test Record
 
@@ -28,7 +28,7 @@ This smoke test covers the main current features:
 - Chrome extension connection and popup-mediated approvals.
 - Tab discovery with privacy-preserving tab metadata.
 - Per-tab site authorization and release.
-- Semantic snapshots with stable `@r_` refs.
+- Interactive snapshots with volatile `@eN` refs.
 - Bounded text and sanitized HTML reads.
 - Ref actions: click, focus, type, clear, select, check, uncheck.
 - Non-ref actions: key press, scroll, coordinate click, coordinate drag.
@@ -237,68 +237,51 @@ If you do not have a fixture server, use any safe page with equivalent controls.
 
    Expected result: status/cancel either reports the current approval state or a clear not-found/expired response. It must not crash.
 
-## 8. Snapshot and Stable Ref Identity
+## 8. Snapshot and Volatile Ref Identity
 
-1. Take a snapshot:
+1. Connect to the current tab and take an interactive snapshot:
 
    ```bash
-   tabbridge snapshot --tab <TAB_ID> --json
+   tabbridge connect --current --json
+   tabbridge snapshot --json
    ```
 
-2. Record:
+2. Record refs from the latest snapshot:
 
    ```text
-   SNAPSHOT_ID=<snapshotId>
-   SAVE_REF=<ref for Save>
-   DELETE_REF=<ref for Delete account>
-   NAME_REF=<ref for Name input>
-   PLAN_REF=<ref for Plan select>
-   AGREE_REF=<ref for Agree checkbox>
+   SAVE_REF=<@e ref for Save>
+   DELETE_REF=<@e ref for Delete account>
+   NAME_REF=<@e ref for Name input>
+   PLAN_REF=<@e ref for Plan select>
+   AGREE_REF=<@e ref for Agree checkbox>
    ```
 
 3. Expected result:
 
    - Output is `ok: true`.
-   - Snapshot contains frames and semantic elements.
-   - Element refs use stable identity format like `@r_<hash>`, not old index refs like `@e1`.
+   - Snapshot contains compact page metadata plus interactive refs.
+   - Element refs use volatile document-order format like `@e1`, `@e2`, and are fresh for each snapshot.
    - Each element includes role/name semantics.
    - Form controls have correct roles:
      - text input -> `textbox`
      - checkbox -> `checkbox`
      - select -> `combobox`
      - buttons -> `button`
-   - Elements include state labels such as `enabled`, `checked`, `disabled`, or `expanded` where applicable.
    - Snapshot does not leak typed input values.
 
-4. Verify URL privacy default:
-
-   ```bash
-   tabbridge snapshot --tab <TAB_ID> --json
-   ```
-
-   Expected result: full URL is not included unless the command requests it.
-
-5. Verify explicit URL inclusion:
-
-   ```bash
-   tabbridge snapshot --tab <TAB_ID> --include-url --json
-   ```
-
-   Expected result: URL is included only in this explicit mode.
-
-6. Verify stable refs after DOM reorder:
+4. Verify ref volatility after DOM reorder:
 
    - Click the fixture page’s `Reorder Save` button manually, or run a safe action that moves the `Save` button.
    - Take another snapshot:
 
      ```bash
-     tabbridge snapshot --tab <TAB_ID> --json
+     tabbridge snapshot --json
      ```
 
    Expected result:
 
-   - `Save` still has the same `SAVE_REF`.
-   - Other unchanged elements keep their refs where semantically possible.
+   - Refs are reassigned from `@e1` by current document order.
+   - Actions should use refs from the latest snapshot only.
    - Duplicate buttons named `Duplicate` receive distinct refs.
 
 ## 9. Bounded Text Read
@@ -306,7 +289,7 @@ If you do not have a fixture server, use any safe page with equivalent controls.
 1. Run:
 
    ```bash
-   tabbridge text --tab <TAB_ID> --max-bytes 1024 --json
+   tabbridge text --max-bytes 1024 --json
    ```
 
 2. Expected result:
@@ -319,7 +302,7 @@ If you do not have a fixture server, use any safe page with equivalent controls.
 3. Run with a small byte limit:
 
    ```bash
-   tabbridge text --tab <TAB_ID> --max-bytes 16 --json
+   tabbridge text --max-bytes 16 --json
    ```
 
 4. Expected result:
@@ -329,38 +312,37 @@ If you do not have a fixture server, use any safe page with equivalent controls.
 
 ## 10. Sanitized HTML Read
 
-1. Run:
+1. Run against a ref from the latest snapshot:
 
    ```bash
-   tabbridge html --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <NAME_REF> --max-bytes 2048 --json
+   tabbridge html <NAME_REF> --max-bytes 2048 --json
    ```
 
 2. Expected result:
 
    - Output is `ok: true`.
-   - Returned HTML is scoped to the semantically matched element.
+   - Returned HTML is scoped to the latest matching element.
    - Scripts, styles, noscript, hidden inputs, and form values are removed.
    - The original input value such as `private initial value` is not present.
-   - This should work through semantic ref matching, not selector/xpath identity.
 
-3. Run with an ambiguous duplicate ref if available:
+3. Run with an unavailable latest ref:
 
    ```bash
-   tabbridge html --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <DUPLICATE_REF> --json
+   tabbridge html @e999 --json
    ```
 
 4. Expected result:
 
-   - If the live DOM has ambiguous same-semantic candidates, command returns `REF_STALE` rather than guessing.
+   - If the latest snapshot does not contain the ref, command returns `REF_STALE`.
 
 ## 11. Ref Actions
 
-Use refs from the latest snapshot unless the step explicitly tests stability across snapshots.
+Use refs from the latest snapshot. Re-run `tabbridge snapshot` after navigation or DOM changes before acting.
 
 ### 11.1 Focus
 
 ```bash
-tabbridge focus --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <NAME_REF> --json
+tabbridge focus <NAME_REF> --json
 ```
 
 Expected result:
@@ -368,22 +350,22 @@ Expected result:
 - Output is `ok: true`.
 - The corresponding input receives focus.
 
-### 11.2 Type
+### 11.2 Fill
 
 ```bash
-tabbridge type --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <NAME_REF> --text "Alice" --json
+tabbridge fill <NAME_REF> "Alice" --json
 ```
 
 Expected result:
 
 - Output is `ok: true`.
-- The input value changes in the page.
+- The input value is replaced in the page.
 - A subsequent snapshot does not leak the typed value.
 
 ### 11.3 Type from stdin
 
 ```bash
-printf " from stdin" | tabbridge type --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <NAME_REF> --text-stdin --json
+printf " from stdin" | tabbridge type <NAME_REF> --text-stdin --json
 ```
 
 Expected result:
@@ -394,7 +376,7 @@ Expected result:
 ### 11.4 Clear
 
 ```bash
-tabbridge clear --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <NAME_REF> --json
+tabbridge clear <NAME_REF> --json
 ```
 
 Expected result:
@@ -406,7 +388,7 @@ Expected result:
 ### 11.5 Select
 
 ```bash
-tabbridge select --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <PLAN_REF> --value pro --json
+tabbridge select <PLAN_REF> pro --json
 ```
 
 Expected result:
@@ -418,8 +400,8 @@ Expected result:
 ### 11.6 Check and Uncheck
 
 ```bash
-tabbridge check --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <AGREE_REF> --json
-tabbridge uncheck --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <AGREE_REF> --json
+tabbridge check <AGREE_REF> --json
+tabbridge uncheck <AGREE_REF> --json
 ```
 
 Expected result:
@@ -431,14 +413,13 @@ Expected result:
 ### 11.7 Click
 
 ```bash
-tabbridge click --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <SAVE_REF> --json
+tabbridge click <SAVE_REF> --json
 ```
 
 Expected result:
 
 - Output is `ok: true` for low-risk safe controls.
-- If the live DOM moved but the same semantic element still exists, the action resolves via stable ref identity.
-- If the live DOM no longer contains a safe semantic match, output is `REF_STALE`.
+- If the live DOM no longer contains the latest ref, output is `REF_STALE`.
 
 ## 12. High-Risk and Coordinate Approvals
 
@@ -448,7 +429,7 @@ Expected result:
 2. Run:
 
    ```bash
-   tabbridge click --tab <TAB_ID> --snapshot-id <SNAPSHOT_ID> --ref <DELETE_REF> --json
+   tabbridge click <DELETE_REF> --json
    ```
 
 3. Expected result:
@@ -466,7 +447,7 @@ tabbridge click-coordinates --tab <TAB_ID> --x 20 --y 20 --json
 
 Expected result:
 
-- Coordinate action requires high-risk confirmation because it cannot be tied to a stable semantic ref.
+- Coordinate action requires high-risk confirmation because it cannot be tied to a semantic ref from the latest snapshot.
 - If approved, it clicks the element at that point.
 - If no element exists at that point, output is `ELEMENT_NOT_VISIBLE`.
 
@@ -683,9 +664,9 @@ Mark the smoke test **Pass** only if all are true:
 - Extension connects and can mediate approvals.
 - Tabs can be listed/current tab can be identified without leaking full URLs by default.
 - Authorization flow works.
-- Snapshot returns semantic `@r_` refs with role/name/state/bounding box/identity hash semantics.
+- Snapshot returns volatile `@eN` refs with role/name semantics and no form-value leakage.
 - Text and HTML reads are bounded and do not leak secrets or form values.
-- Ref actions operate on stable semantic refs and fail stale on ambiguity.
+- Ref actions operate on refs from the latest snapshot and fail stale when unavailable.
 - Coordinate actions require confirmation.
 - Navigation clears refs.
 - Screenshot works only for the active tab and reports inactive-tab errors correctly.

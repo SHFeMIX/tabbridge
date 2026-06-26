@@ -1,4 +1,5 @@
 import { HTML_DEFAULT_MAX_BYTES, TEXT_DEFAULT_MAX_BYTES, errorEnvelope, refStaleError } from '@tabbridge/shared'
+import { defineContentScript } from 'wxt/utils/define-content-script'
 import { executeRefAction } from '../content/actions'
 import { readVisibleText } from '../content/bounded-read'
 import { readRefHtml } from '../content/ref-html'
@@ -21,17 +22,13 @@ export default defineContentScript({
         }
 
         const now = Date.now()
-        const previousRecords = refStore.getPreviousCandidates(message.tabId, 'f0', now)
         const result = extractSnapshotFromDocument({
           tabId: message.tabId,
-          snapshotId: message.snapshotId,
           title: document.title,
           url: window.location.href,
-          includeUrl: Boolean(message.includeUrl),
           now,
-          previousRecords,
         })
-        refStore.saveSnapshot(message.snapshotId, result.records, now, message.tabId)
+        refStore.saveLatest(message.tabId, result.records, now)
         sendResponse({ ok: true, data: result.snapshot })
         return true
       }
@@ -44,10 +41,9 @@ export default defineContentScript({
       if (message?.type === 'tabbridge.html') {
         const now = Date.now()
         const record = refStore.getLatestRecord(message.tabId, message.frameRef ?? 'f0', message.ref, now)
-          ?? refStore.getRecord(message.snapshotId, message.frameRef ?? 'f0', message.ref, now)
         const result = record ? readRefHtml(record, message.maxBytes ?? HTML_DEFAULT_MAX_BYTES) : undefined
         if (!result) {
-          sendResponse(errorEnvelope(refStaleError(message.tabId)))
+          sendResponse(errorEnvelope(refStaleError(message.tabId, message.ref)))
           return true
         }
         sendResponse({ ok: true, data: result })
@@ -58,7 +54,6 @@ export default defineContentScript({
         executeRefAction({
           command: message.command,
           tabId: message.tabId,
-          snapshotId: message.snapshotId,
           frameRef: message.frameRef ?? 'f0',
           ref: message.ref,
           text: message.text,

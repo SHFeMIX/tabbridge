@@ -1,12 +1,36 @@
-import { createSiteGrant } from '@tabbridge/shared'
+import { createSiteGrant, type BridgeRequest } from '@tabbridge/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { routeBridgeMethod } from '../src/background/commands'
+import { routeBridgeCommand, routeBridgeMethod } from '../src/background/commands'
 import { setGrants } from '../src/background/grants'
 
+function request(command: string, payload: Record<string, unknown> = {}): BridgeRequest {
+  return {
+    id: 'test',
+    protocolVersion: 1,
+    source: 'cli',
+    target: 'extension',
+    command,
+    payload,
+    createdAt: Date.now(),
+  }
+}
+
+function authorizedTab() {
+  return {
+    id: 42,
+    tabId: 42,
+    windowId: 7,
+    active: true,
+    title: 'Docs',
+    url: 'https://docs.example.com/page',
+  }
+}
+
 describe('extension command router', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.unstubAllGlobals()
     setGrants([])
+    await routeBridgeCommand(request('session.disconnect'))
   })
 
   it('returns bridge connected status', async () => {
@@ -38,71 +62,187 @@ describe('extension command router', () => {
     expect(query).toHaveBeenCalledWith({})
   })
 
-  it('routes authorized snapshot requests to the tab content script', async () => {
-    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
-    const get = vi.fn().mockResolvedValue({
-      id: 42,
-      windowId: 7,
-      active: false,
-      title: 'Docs',
-      url: 'https://docs.example.com/page',
-    })
-    const sendMessage = vi.fn().mockResolvedValue({
+  it('connects a default session to the current tab and reports status', async () => {
+    const context = { currentTab: vi.fn().mockResolvedValue(authorizedTab()), listTabs: vi.fn() }
+
+    await expect(routeBridgeCommand(request('session.connect', { current: true }), context)).resolves.toEqual({
       ok: true,
-      data: { snapshotId: 'snap_fixed', tabId: 42, frames: [] },
+      data: { connected: true, tabId: 42, title: 'Docs', url: 'https://docs.example.com/page' },
     })
-    vi.stubGlobal('chrome', { tabs: { get, sendMessage } })
+    await expect(routeBridgeCommand(request('session.status'), context)).resolves.toEqual({
+      ok: true,
+      data: { connected: true, tabId: 42, title: 'Docs', url: 'https://docs.example.com/page', latestSnapshotAvailable: false },
+    })
+    await expect(routeBridgeCommand(request('session.disconnect'), context)).resolves.toEqual({ ok: true, data: { disconnected: true } })
+  })
 
-    await expect(routeBridgeMethod('snapshot', { tabId: 42, snapshotId: 'snap_fixed', includeUrl: true })).resolves.toEqual({
-      snapshotId: 'snap_fixed',
-      tabId: 42,
-      frames: [],
+  it('connects a default session to an explicit tab id instead of the active tab', async () => {
+    const requestedTab = { ...authorizedTab(), id: 123, tabId: 123, title: 'Requested', url: 'https://requested.example.com/page' }
+    const context = {
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(requestedTab),
+      listTabs: vi.fn(),
+    }
+
+    await expect(routeBridgeCommand(request('session.connect', { tabId: 123 }), context)).resolves.toEqual({
+      ok: true,
+      data: { connected: true, tabId: 123, title: 'Requested', url: 'https://requested.example.com/page' },
     })
-    expect(get).toHaveBeenCalledWith(42)
-    expect(sendMessage).toHaveBeenCalledWith(42, {
-      type: 'tabbridge.snapshot',
-      tabId: 42,
-      snapshotId: 'snap_fixed',
-      includeUrl: true,
+    await expect(routeBridgeCommand(request('session.status'), context)).resolves.toEqual({
+      ok: true,
+      data: { connected: true, tabId: 123, title: 'Requested', url: 'https://requested.example.com/page', latestSnapshotAvailable: false },
     })
   })
 
-  it('rejects snapshot requests for unauthorized tabs before messaging the content script', async () => {
-    const get = vi.fn().mockResolvedValue({
-      id: 42,
-      windowId: 7,
-      active: false,
-      title: 'Docs',
-      url: 'https://docs.example.com/page',
-    })
-    const sendMessage = vi.fn().mockResolvedValue({ ok: true, data: { snapshotId: 'snap_fixed', tabId: 42, frames: [] } })
-    vi.stubGlobal('chrome', { tabs: { get, sendMessage } })
+  it('routes authorized snapshot requests to the current session tab without snapshot ids', async () => {
+    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
+    const sendMessageToTab = vi.fn().mockResolvedValue({ ok: true, data: { page: { title: 'Docs', url: 'https://docs.example.com/page' }, refs: [], text: 'Page: Docs' } })
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+    }
 
-    await expect(routeBridgeMethod('snapshot', { tabId: 42, snapshotId: 'snap_fixed' })).rejects.toMatchObject({
-      code: 'TAB_NOT_AUTHORIZED',
+    await expect(routeBridgeCommand(request('snapshot', { interactive: true }), context)).resolves.toEqual({
+      ok: true,
+      data: { page: { title: 'Docs', url: 'https://docs.example.com/page' }, refs: [], text: 'Page: Docs' },
     })
-    expect(get).toHaveBeenCalledWith(42)
-    expect(sendMessage).not.toHaveBeenCalled()
+    expect(sendMessageToTab).toHaveBeenCalledWith(42, { type: 'tabbridge.snapshot', tabId: 42, interactive: true, includeUrl: true })
+    await expect(routeBridgeCommand(request('session.status'), context)).resolves.toEqual({
+      ok: true,
+      data: { connected: true, tabId: 42, title: 'Docs', url: 'https://docs.example.com/page', latestSnapshotAvailable: true },
+    })
   })
 
-  it('keeps text reads unsupported in the legacy JSON-RPC adapter', async () => {
-    const sendMessage = vi.fn().mockResolvedValue({ ok: true, data: { text: 'secret page text' } })
-    vi.stubGlobal('chrome', { tabs: { sendMessage } })
+  it('rejects snapshot requests for unauthorized current session tabs before messaging content', async () => {
+    const sendMessageToTab = vi.fn()
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+    }
 
-    await expect(routeBridgeMethod('text', { tabId: 42 })).rejects.toMatchObject({
-      code: 'ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE',
-    })
-    expect(sendMessage).not.toHaveBeenCalled()
+    const result = await routeBridgeCommand(request('snapshot', { interactive: true }), context)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('TAB_NOT_AUTHORIZED')
+    expect(sendMessageToTab).not.toHaveBeenCalled()
   })
 
-  it('keeps navigation unsupported in the legacy JSON-RPC adapter', async () => {
-    const sendMessage = vi.fn().mockResolvedValue({ ok: true, data: {} })
-    vi.stubGlobal('chrome', { tabs: { sendMessage } })
+  it('routes latest-ref actions without snapshot ids after a snapshot', async () => {
+    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
+    const sendMessageToTab = vi.fn()
+      .mockResolvedValueOnce({ ok: true, data: { page: { title: 'Docs', url: 'https://docs.example.com/page' }, refs: [{ ref: '@e1' }], text: 'Page: Docs' } })
+      .mockResolvedValueOnce({ ok: true, data: { action: 'click', ref: '@e1' } })
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+    }
 
-    await expect(routeBridgeMethod('navigation.reload', { tabId: 42 })).rejects.toMatchObject({
-      code: 'BROWSER_COMMAND_TIMEOUT',
+    await routeBridgeCommand(request('snapshot', { interactive: true }), context)
+    await expect(routeBridgeCommand(request('action.click', { ref: '@e1' }), context)).resolves.toEqual({ ok: true, data: { action: 'click', ref: '@e1' } })
+
+    expect(sendMessageToTab).toHaveBeenLastCalledWith(42, { type: 'tabbridge.action', command: 'click', tabId: 42, frameRef: 'f0', ref: '@e1' })
+  })
+
+  it('requires a latest interactive snapshot before ref actions', async () => {
+    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
+    const sendMessageToTab = vi.fn()
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+    }
+    await routeBridgeCommand(request('session.connect', { current: true }), context)
+
+    const result = await routeBridgeCommand(request('action.click', { ref: '@e1' }), context)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('SNAPSHOT_REQUIRED')
+    expect(sendMessageToTab).not.toHaveBeenCalled()
+  })
+
+  it('keeps authorization ahead of snapshot-required action checks', async () => {
+    const sendMessageToTab = vi.fn()
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+    }
+    await routeBridgeCommand(request('session.connect', { current: true }), context)
+
+    const result = await routeBridgeCommand(request('action.click', { ref: '@e1' }), context)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('TAB_NOT_AUTHORIZED')
+    expect(sendMessageToTab).not.toHaveBeenCalled()
+  })
+
+  it('requires authorization before wait-for-text reads page content', async () => {
+    const sendMessageToTab = vi.fn()
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+    }
+
+    const result = await routeBridgeCommand(request('waitForText', { text: 'secret' }), context)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('TAB_NOT_AUTHORIZED')
+    expect(sendMessageToTab).not.toHaveBeenCalled()
+  })
+
+  it('clears latest refs after navigation', async () => {
+    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
+    const sendMessageToTab = vi.fn()
+      .mockResolvedValueOnce({ ok: true, data: { page: { title: 'Docs', url: 'https://docs.example.com/page' }, refs: [{ ref: '@e1' }], text: 'Page: Docs' } })
+      .mockResolvedValueOnce({ ok: true, data: { cleared: true } })
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+      reloadTab: vi.fn().mockResolvedValue(undefined),
+    }
+
+    await routeBridgeCommand(request('snapshot', { interactive: true }), context)
+    await expect(routeBridgeCommand(request('navigation.reload'), context)).resolves.toEqual({ ok: true, data: { navigated: true, refsCleared: true } })
+    const action = await routeBridgeCommand(request('action.click', { ref: '@e1' }), context)
+
+    expect(action.ok).toBe(false)
+    if (!action.ok) expect(action.error.code).toBe('SNAPSHOT_REQUIRED')
+    expect(sendMessageToTab).toHaveBeenLastCalledWith(42, { type: 'tabbridge.clearRefs', tabId: 42 })
+  })
+
+  it('clears background latest refs after navigation even when content ref clearing fails', async () => {
+    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
+    const sendMessageToTab = vi.fn()
+      .mockResolvedValueOnce({ ok: true, data: { page: { title: 'Docs', url: 'https://docs.example.com/page' }, refs: [{ ref: '@e1' }], text: 'Page: Docs' } })
+      .mockRejectedValueOnce(new Error('content unavailable after reload'))
+    const context = {
+      listTabs: vi.fn(),
+      currentTab: vi.fn().mockResolvedValue(authorizedTab()),
+      getTab: vi.fn().mockResolvedValue(authorizedTab()),
+      sendMessageToTab,
+      reloadTab: vi.fn().mockResolvedValue(undefined),
+    }
+
+    await routeBridgeCommand(request('snapshot', { interactive: true }), context)
+    const navigation = await routeBridgeCommand(request('navigation.reload'), context)
+    expect(navigation.ok).toBe(false)
+
+    await expect(routeBridgeCommand(request('session.status'), context)).resolves.toEqual({
+      ok: true,
+      data: { connected: true, tabId: 42, title: 'Docs', url: 'https://docs.example.com/page', latestSnapshotAvailable: false },
     })
-    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it('returns the active current-window tab as redacted output', async () => {
