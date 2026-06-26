@@ -40,7 +40,3 @@ function fnv1a(value: string): string {
 export function createIdentityHash(input: IdentityInput): string {
   return fnv1a(stableJson(input))
 }
-
-export function createStableRef(identityHash: string): string {
-  return `@r_${identityHash}`
-}

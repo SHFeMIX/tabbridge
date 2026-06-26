@@ -1,12 +1,11 @@
-import { errorEnvelope, okEnvelope, refStaleError, type CliEnvelope, type ElementRefRecord } from '@tabbridge/shared'
+import { errorEnvelope, okEnvelope, refStaleError, snapshotRequiredError, type CliEnvelope, type ElementRefRecord } from '@tabbridge/shared'
 import { fingerprintElement } from './element-fingerprint'
 import { findBestLiveMatch } from './identity-matcher'
 import type { RefStore } from './ref-store'
 
 export type RefActionInput = {
-  command: 'click' | 'type' | 'clear' | 'select' | 'check' | 'uncheck' | 'focus'
+  command: 'click' | 'type' | 'fill' | 'clear' | 'select' | 'check' | 'uncheck' | 'focus'
   tabId: number
-  snapshotId: string
   frameRef: string
   ref: string
   text?: string
@@ -62,16 +61,19 @@ function visibleAndEnabled(element: Element): CliEnvelope<undefined> | undefined
   return undefined
 }
 
-function recordFor(input: RefActionInput, store: RefStore, now: number): ElementRefRecord | undefined {
-  return store.getLatestRecord(input.tabId, input.frameRef, input.ref, now) ?? store.getRecord(input.snapshotId, input.frameRef, input.ref, now)
+function updateValue(element: Element, value: string): void {
+  ;(element as HTMLInputElement).value = value
+  element.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
 export async function executeRefAction(input: RefActionInput, store: RefStore, now: number): Promise<CliEnvelope<ActionResult>> {
-  const record = recordFor(input, store, now)
-  if (!record) return errorEnvelope(refStaleError(input.tabId))
+  if (!store.hasLatestSnapshot(input.tabId, now)) return errorEnvelope(snapshotRequiredError())
+
+  const record = store.getLatestRecord(input.tabId, input.frameRef, input.ref, now)
+  if (!record) return errorEnvelope(refStaleError(input.tabId, input.ref))
 
   const element = resolveLiveElement(record)
-  if (!element) return errorEnvelope(refStaleError(input.tabId))
+  if (!element) return errorEnvelope(refStaleError(input.tabId, input.ref))
 
   const invalid = visibleAndEnabled(element)
   if (invalid) return invalid as CliEnvelope<ActionResult>
@@ -81,11 +83,11 @@ export async function executeRefAction(input: RefActionInput, store: RefStore, n
   } else if (input.command === 'focus') {
     ;(element as HTMLElement).focus()
   } else if (input.command === 'clear') {
-    ;(element as HTMLInputElement).value = ''
-    element.dispatchEvent(new Event('input', { bubbles: true }))
+    updateValue(element, '')
+  } else if (input.command === 'fill') {
+    updateValue(element, input.text ?? '')
   } else if (input.command === 'type') {
-    ;(element as HTMLInputElement).value = `${(element as HTMLInputElement).value ?? ''}${input.text ?? ''}`
-    element.dispatchEvent(new Event('input', { bubbles: true }))
+    updateValue(element, `${(element as HTMLInputElement).value ?? ''}${input.text ?? ''}`)
   } else if (input.command === 'select') {
     ;(element as HTMLSelectElement).value = input.value ?? ''
     element.dispatchEvent(new Event('change', { bubbles: true }))

@@ -31,7 +31,7 @@ async function readStdin(stdin: Readable): Promise<string> {
 }
 
 async function hydrateStdinPayload(parsed: ParsedCli, stdin: Readable): Promise<ParsedCli> {
-  if (parsed.command !== 'action.type' || parsed.payload.textFromStdin !== true) return parsed
+  if (!['action.type', 'action.fill'].includes(parsed.command) || parsed.payload.textFromStdin !== true) return parsed
 
   const { textFromStdin: _textFromStdin, ...payloadWithoutMarker } = parsed.payload
   return {
@@ -70,7 +70,11 @@ export async function run(options: RunOptions = {}): Promise<number> {
     if (parsed.json) {
       printJsonEnvelope(envelope, stdout)
     } else if (envelope.ok) {
-      stdout.write(`${JSON.stringify(envelope.data, null, 2)}\n`)
+      if (parsed.command === 'snapshot' && typeof (envelope.data as { text?: unknown }).text === 'string') {
+        stdout.write(`${(envelope.data as { text: string }).text}\n`)
+      } else {
+        stdout.write(`${JSON.stringify(envelope.data, null, 2)}\n`)
+      }
     } else {
       stderr.write(`${envelope.error.message}\n`)
     }

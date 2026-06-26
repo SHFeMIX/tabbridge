@@ -18,16 +18,89 @@ describe('CLI parser', () => {
     })
   })
 
-  it('requires snapshot id for ref-based actions', () => {
-    expect(() => parseCli(['click', '--tab', '123', '--ref', '@e1', '--json'])).toThrow('click requires --tab, --snapshot-id, and --ref')
+  it('parses snapshot and snapshot -i as interactive snapshots', () => {
+    expect(parseCli(['snapshot'])).toEqual({
+      command: 'snapshot',
+      json: false,
+      payload: { interactive: true },
+    })
+    expect(parseCli(['snapshot', '-i', '--json'])).toEqual({
+      command: 'snapshot',
+      json: true,
+      payload: { interactive: true },
+    })
   })
 
-  it('parses type stdin without placing text in argv payload', () => {
-    expect(parseCli(['type', '--tab', '123', '--snapshot-id', 'snap_1', '--ref', '@e1', '--text-stdin', '--json'])).toEqual({
+  it('parses positional ref actions without tab or snapshot id', () => {
+    expect(parseCli(['click', '@e1', '--json'])).toEqual({
+      command: 'action.click',
+      json: true,
+      payload: { ref: '@e1' },
+    })
+    expect(parseCli(['fill', '@e2', 'hello'])).toEqual({
+      command: 'action.fill',
+      json: false,
+      payload: { ref: '@e2', text: 'hello' },
+    })
+    expect(parseCli(['select', '@e3', 'us-east-1'])).toEqual({
+      command: 'action.select',
+      json: false,
+      payload: { ref: '@e3', value: 'us-east-1' },
+    })
+  })
+
+  it('parses stdin text for fill and type', () => {
+    expect(parseCli(['fill', '@e1', '--text-stdin', '--json'])).toEqual({
+      command: 'action.fill',
+      json: true,
+      payload: { ref: '@e1', textFromStdin: true },
+    })
+    expect(parseCli(['type', '@e1', '--text-stdin', '--json'])).toEqual({
       command: 'action.type',
       json: true,
-      payload: { tabId: 123, snapshotId: 'snap_1', ref: '@e1', textFromStdin: true },
+      payload: { ref: '@e1', textFromStdin: true },
     })
+  })
+
+  it('parses current-tab session commands', () => {
+    expect(parseCli(['connect', '--current', '--json'])).toEqual({
+      command: 'session.connect',
+      json: true,
+      payload: { current: true },
+    })
+    expect(parseCli(['connect', '--tab', '123'])).toEqual({
+      command: 'session.connect',
+      json: false,
+      payload: { tabId: 123 },
+    })
+    expect(parseCli(['session'])).toEqual({ command: 'session.status', json: false, payload: {} })
+    expect(parseCli(['disconnect'])).toEqual({ command: 'session.disconnect', json: false, payload: {} })
+  })
+
+  it('parses text screenshot and navigation without tab flags', () => {
+    expect(parseCli(['text', '--json'])).toEqual({ command: 'text', json: true, payload: {} })
+    expect(parseCli(['screenshot', 'page.png'])).toEqual({ command: 'screenshot', json: false, payload: { path: 'page.png' } })
+    expect(parseCli(['reload'])).toEqual({ command: 'navigation.reload', json: false, payload: {} })
+    expect(parseCli(['back'])).toEqual({ command: 'navigation.back', json: false, payload: {} })
+    expect(parseCli(['forward'])).toEqual({ command: 'navigation.forward', json: false, payload: {} })
+  })
+
+  it('parses dash-prefixed free text and negative numeric flag values', () => {
+    expect(parseCli(['fill', '@e1', '-prefixed'])).toEqual({
+      command: 'action.fill',
+      json: false,
+      payload: { ref: '@e1', text: '-prefixed' },
+    })
+    expect(parseCli(['scroll', '--dy', '-500', '--json'])).toEqual({
+      command: 'action.scroll',
+      json: true,
+      payload: { dx: 0, dy: -500 },
+    })
+  })
+
+  it('rejects ref actions without a positional ref', () => {
+    expect(() => parseCli(['click'])).toThrow('click requires a ref like @e1')
+    expect(() => parseCli(['fill', '@e1'])).toThrow('fill requires text or --text-stdin')
   })
 
   it('parses status without native host diagnostic payload', () => {
@@ -61,6 +134,6 @@ describe('CLI parser', () => {
   })
 
   it('rejects a value flag when the next token is another flag', () => {
-    expect(() => parseCli(['type', '--tab', '123', '--snapshot-id', 'snap_1', '--ref', '@e1', '--text', '--json'])).toThrow('--text requires a value')
+    expect(() => parseCli(['type', '@e1', '--text', '--json'])).toThrow('--text requires a value')
   })
 })

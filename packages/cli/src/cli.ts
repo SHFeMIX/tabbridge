@@ -4,12 +4,16 @@ export type ParsedCli = {
   payload: Record<string, unknown>
 }
 
+function isValueFlag(token: string): boolean {
+  return token.startsWith('--') && token !== '--json' && token !== '--current' && token !== '--text-stdin'
+}
+
 function readFlag(argv: string[], flag: string): string | undefined {
   const index = argv.indexOf(flag)
   if (index < 0) return undefined
 
   const value = argv[index + 1]
-  if (value === undefined || value.startsWith('--')) throw new Error(`${flag} requires a value`)
+  if (value === undefined || value.startsWith('--') || value === '-i') throw new Error(`${flag} requires a value`)
 
   return value
 }
@@ -36,6 +40,50 @@ function requireStringFlag(argv: string[], flag: string, command: string): strin
   const value = readFlag(argv, flag)
   if (!value) throw new Error(`${command} requires ${flag}`)
   return value
+}
+
+function positionalArgs(argv: string[]): string[] {
+  const values: string[] = []
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (!token) continue
+    if (token.startsWith('--')) {
+      if (isValueFlag(token)) index += 1
+      continue
+    }
+    if (token === '-i') continue
+    values.push(token)
+  }
+  return values
+}
+
+function parseRefAction(first: string, argv: string[], json: boolean): ParsedCli {
+  const [, ref, value] = positionalArgs(argv)
+  if (!ref) throw new Error(`${first} requires a ref like @e1`)
+
+  const payload: Record<string, unknown> = { ref }
+  if (first === 'select') {
+    if (!value) throw new Error('select requires a value')
+    payload.value = value
+  }
+
+  return { command: `action.${first}`, json, payload }
+}
+
+function parseTextAction(first: 'fill' | 'type', argv: string[], json: boolean): ParsedCli {
+  const [, ref, positionalText] = positionalArgs(argv)
+  if (!ref) throw new Error(`${first} requires a ref like @e1`)
+
+  const textFromStdin = hasFlag(argv, '--text-stdin')
+  const flagText = readFlag(argv, '--text')
+  const text = flagText ?? positionalText
+  if (!text && !textFromStdin) throw new Error(`${first} requires text or --text-stdin`)
+
+  return {
+    command: `action.${first}`,
+    json,
+    payload: textFromStdin ? { ref, textFromStdin: true } : { ref, text },
+  }
 }
 
 export function parseCli(argv: string[]): ParsedCli {
@@ -76,58 +124,44 @@ export function parseCli(argv: string[]): ParsedCli {
     return { command: 'approvals.wait', json, payload: { approvalId: requireStringFlag(argv, '--id', 'approvals wait'), timeoutMs: timeout } }
   }
 
-  if (first === 'snapshot') {
-    return { command: 'snapshot', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'snapshot'), includeUrl: hasFlag(argv, '--include-url') } }
+  if (first === 'connect') {
+    const tabId = readNumberFlag(argv, '--tab')
+    return { command: 'session.connect', json, payload: tabId === undefined ? { current: true } : { tabId } }
   }
-  if (first === 'text') {
-    return { command: 'text', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'text'), maxBytes: readNumberFlag(argv, '--max-bytes') } }
-  }
+  if (first === 'session') return { command: 'session.status', json, payload: {} }
+  if (first === 'disconnect') return { command: 'session.disconnect', json, payload: {} }
+
+  if (first === 'snapshot') return { command: 'snapshot', json, payload: { interactive: true } }
+  if (first === 'text') return { command: 'text', json, payload: { maxBytes: readNumberFlag(argv, '--max-bytes') } }
   if (first === 'html') {
     return {
       command: 'html',
       json,
       payload: {
-        tabId: requireNumberFlag(argv, '--tab', 'html'),
-        snapshotId: requireStringFlag(argv, '--snapshot-id', 'html'),
         ref: requireStringFlag(argv, '--ref', 'html'),
         maxBytes: readNumberFlag(argv, '--max-bytes'),
       },
     }
   }
-  if (first === 'screenshot') return { command: 'screenshot', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'screenshot') } }
+  if (first === 'screenshot') {
+    const [, path] = positionalArgs(argv)
+    return { command: 'screenshot', json, payload: path ? { path } : {} }
+  }
 
   const refActions = new Set(['click', 'clear', 'select', 'check', 'uncheck', 'focus'])
-  if (first && refActions.has(first)) {
-    const tabId = readNumberFlag(argv, '--tab')
-    const snapshotId = readFlag(argv, '--snapshot-id')
-    const ref = readFlag(argv, '--ref')
-    if (tabId === undefined || !snapshotId || !ref) throw new Error(`${first} requires --tab, --snapshot-id, and --ref`)
-    const payload: Record<string, unknown> = { tabId, snapshotId, ref }
-    if (first === 'select') payload.value = requireStringFlag(argv, '--value', 'select')
-    return { command: `action.${first}`, json, payload }
-  }
+  if (first && refActions.has(first)) return parseRefAction(first, argv, json)
+  if (first === 'fill' || first === 'type') return parseTextAction(first, argv, json)
 
-  if (first === 'type') {
-    const tabId = readNumberFlag(argv, '--tab')
-    const snapshotId = readFlag(argv, '--snapshot-id')
-    const ref = readFlag(argv, '--ref')
-    if (tabId === undefined || !snapshotId || !ref) throw new Error('type requires --tab, --snapshot-id, and --ref')
-    const text = readFlag(argv, '--text')
-    const textFromStdin = hasFlag(argv, '--text-stdin')
-    if (!text && !textFromStdin) throw new Error('type requires --text or --text-stdin')
-    return { command: 'action.type', json, payload: textFromStdin ? { tabId, snapshotId, ref, textFromStdin: true } : { tabId, snapshotId, ref, text } }
-  }
+  if (first === 'press') return { command: 'action.press', json, payload: { key: requireStringFlag(argv, '--key', 'press') } }
+  if (first === 'scroll') return { command: 'action.scroll', json, payload: { dx: readNumberFlag(argv, '--dx') ?? 0, dy: readNumberFlag(argv, '--dy') ?? 0 } }
+  if (first === 'click-coordinates') return { command: 'action.clickCoordinates', json, payload: { x: requireNumberFlag(argv, '--x', 'click-coordinates'), y: requireNumberFlag(argv, '--y', 'click-coordinates') } }
+  if (first === 'drag-coordinates') return { command: 'action.dragCoordinates', json, payload: { fromX: requireNumberFlag(argv, '--from-x', 'drag-coordinates'), fromY: requireNumberFlag(argv, '--from-y', 'drag-coordinates'), toX: requireNumberFlag(argv, '--to-x', 'drag-coordinates'), toY: requireNumberFlag(argv, '--to-y', 'drag-coordinates') } }
 
-  if (first === 'press') return { command: 'action.press', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'press'), key: requireStringFlag(argv, '--key', 'press') } }
-  if (first === 'scroll') return { command: 'action.scroll', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'scroll'), dx: readNumberFlag(argv, '--dx') ?? 0, dy: readNumberFlag(argv, '--dy') ?? 0 } }
-  if (first === 'click-coordinates') return { command: 'action.clickCoordinates', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'click-coordinates'), x: requireNumberFlag(argv, '--x', 'click-coordinates'), y: requireNumberFlag(argv, '--y', 'click-coordinates') } }
-  if (first === 'drag-coordinates') return { command: 'action.dragCoordinates', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'drag-coordinates'), fromX: requireNumberFlag(argv, '--from-x', 'drag-coordinates'), fromY: requireNumberFlag(argv, '--from-y', 'drag-coordinates'), toX: requireNumberFlag(argv, '--to-x', 'drag-coordinates'), toY: requireNumberFlag(argv, '--to-y', 'drag-coordinates') } }
-
-  if (first === 'wait') return { command: 'wait', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'wait'), ms: requireNumberFlag(argv, '--ms', 'wait') } }
-  if (first === 'wait-for-text') return { command: 'waitForText', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'wait-for-text'), text: requireStringFlag(argv, '--text', 'wait-for-text'), timeoutMs: readNumberFlag(argv, '--timeout') } }
-  if (first === 'reload') return { command: 'navigation.reload', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'reload') } }
-  if (first === 'back') return { command: 'navigation.back', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'back') } }
-  if (first === 'forward') return { command: 'navigation.forward', json, payload: { tabId: requireNumberFlag(argv, '--tab', 'forward') } }
+  if (first === 'wait') return { command: 'wait', json, payload: { ms: requireNumberFlag(argv, '--ms', 'wait') } }
+  if (first === 'wait-for-text') return { command: 'waitForText', json, payload: { text: requireStringFlag(argv, '--text', 'wait-for-text'), timeoutMs: readNumberFlag(argv, '--timeout') } }
+  if (first === 'reload') return { command: 'navigation.reload', json, payload: {} }
+  if (first === 'back') return { command: 'navigation.back', json, payload: {} }
+  if (first === 'forward') return { command: 'navigation.forward', json, payload: {} }
 
   throw new Error(`Unknown tabbridge command: ${argv.join(' ')}`)
 }

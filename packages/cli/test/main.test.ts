@@ -22,13 +22,13 @@ function captureWritable(): { writable: Writable; chunks: string[] } {
 }
 
 describe('CLI main runner', () => {
-  it('ensures the broker then sends stdin-hydrated JSON-RPC requests', async () => {
+  it('ensures the broker then sends stdin-hydrated fill requests', async () => {
     const stdout = captureWritable()
     const stderr = captureWritable()
     const sentRequests: unknown[] = []
     const sentOptions: unknown[] = []
     const options: RunOptions = {
-      argv: ['type', '--tab', '123', '--snapshot-id', 'snap_1', '--ref', '@e1', '--text-stdin', '--json'],
+      argv: ['fill', '@e1', '--text-stdin', '--json'],
       stdin: stringReadable('hello from stdin'),
       stdout: stdout.writable,
       stderr: stderr.writable,
@@ -37,7 +37,7 @@ describe('CLI main runner', () => {
       sendBrokerRequest: async <TData>(request: JsonRpcRequest, brokerOptions: BrokerClientOptions) => {
         sentRequests.push(request)
         sentOptions.push(brokerOptions)
-        return { ok: true, data: { typed: true } as TData }
+        return { ok: true, data: { filled: true } as TData }
       },
     }
 
@@ -47,11 +47,33 @@ describe('CLI main runner', () => {
     expect(sentRequests).toEqual([{
       jsonrpc: '2.0',
       id: 'req_stdin',
-      method: 'action.type',
-      params: { tabId: 123, snapshotId: 'snap_1', ref: '@e1', text: 'hello from stdin' },
+      method: 'action.fill',
+      params: { ref: '@e1', text: 'hello from stdin' },
     }])
     expect(sentOptions).toEqual([{ url: 'ws://127.0.0.1:9876', token: 'tok', timeoutMs: 30000 }])
-    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"typed":true}}\n'])
+    expect(stdout.chunks).toEqual(['{"ok":true,"data":{"filled":true}}\n'])
+    expect(stderr.chunks).toEqual([])
+  })
+
+
+  it('prints snapshot text directly in non-json mode', async () => {
+    const stdout = captureWritable()
+    const stderr = captureWritable()
+
+    const exitCode = await run({
+      argv: ['snapshot', '-i'],
+      stdout: stdout.writable,
+      stderr: stderr.writable,
+      requestId: () => 'req_snapshot',
+      ensureBroker: async () => ({ url: 'ws://127.0.0.1:9876', token: 'tok' }),
+      sendBrokerRequest: async <TData>() => ({
+        ok: true,
+        data: { text: 'Page: Example\nURL: https://example.com\n\n@e1 [button] "Sign In"' } as TData,
+      }),
+    })
+
+    expect(exitCode).toBe(0)
+    expect(stdout.chunks).toEqual(['Page: Example\nURL: https://example.com\n\n@e1 [button] "Sign In"\n'])
     expect(stderr.chunks).toEqual([])
   })
 
