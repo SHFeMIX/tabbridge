@@ -474,7 +474,12 @@ export async function routeBridgeMethod(method: string, _params: unknown): Promi
       if (!tab?.url || grantStatusForTab(getGrants(), { tabId, url: tab.url }, Date.now()) !== 'authorized') {
         throw tabNotAuthorizedError(tabId)
       }
-      return await chrome.tabs.sendMessage(tabId, message)
+      try {
+        return await chrome.tabs.sendMessage(tabId, message)
+      } catch {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/content.js'] })
+        return await chrome.tabs.sendMessage(tabId, message)
+      }
     }
   }
 

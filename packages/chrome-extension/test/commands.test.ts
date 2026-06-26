@@ -67,6 +67,30 @@ describe('extension command router', () => {
     })
   })
 
+  it('injects the content script and retries authorized snapshot requests when the tab has no receiver yet', async () => {
+    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
+    const get = vi.fn().mockResolvedValue({
+      id: 42,
+      windowId: 7,
+      active: false,
+      title: 'Docs',
+      url: 'https://docs.example.com/page',
+    })
+    const sendMessage = vi.fn()
+      .mockRejectedValueOnce(new Error('Could not establish connection. Receiving end does not exist.'))
+      .mockResolvedValueOnce({ ok: true, data: { snapshotId: 'snap_fixed', tabId: 42, frames: [] } })
+    const executeScript = vi.fn().mockResolvedValue([{}])
+    vi.stubGlobal('chrome', { tabs: { get, sendMessage }, scripting: { executeScript } })
+
+    await expect(routeBridgeMethod('snapshot', { tabId: 42, snapshotId: 'snap_fixed' })).resolves.toEqual({
+      snapshotId: 'snap_fixed',
+      tabId: 42,
+      frames: [],
+    })
+    expect(executeScript).toHaveBeenCalledWith({ target: { tabId: 42 }, files: ['content-scripts/content.js'] })
+    expect(sendMessage).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects snapshot requests for unauthorized tabs before messaging the content script', async () => {
     const get = vi.fn().mockResolvedValue({
       id: 42,
@@ -85,7 +109,33 @@ describe('extension command router', () => {
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
-  it('keeps text reads unsupported in the legacy JSON-RPC adapter', async () => {
+  it('routes authorized ref actions to the tab content script', async () => {
+    setGrants([createSiteGrant({ tabId: 42, origin: 'https://docs.example.com', grantedByUserAt: Date.now() })])
+    const get = vi.fn().mockResolvedValue({
+      id: 42,
+      windowId: 7,
+      active: false,
+      title: 'Docs',
+      url: 'https://docs.example.com/page',
+    })
+    const sendMessage = vi.fn().mockResolvedValue({ ok: true, data: { action: 'click', ref: '@r_button' } })
+    vi.stubGlobal('chrome', { tabs: { get, sendMessage } })
+
+    await expect(routeBridgeMethod('action.click', { tabId: 42, snapshotId: 'snap_fixed', ref: '@r_button' })).resolves.toEqual({
+      action: 'click',
+      ref: '@r_button',
+    })
+    expect(sendMessage).toHaveBeenCalledWith(42, {
+      type: 'tabbridge.action',
+      command: 'click',
+      tabId: 42,
+      snapshotId: 'snap_fixed',
+      frameRef: 'f0',
+      ref: '@r_button',
+      value: undefined,
+    })
+  })
+
     const sendMessage = vi.fn().mockResolvedValue({ ok: true, data: { text: 'secret page text' } })
     vi.stubGlobal('chrome', { tabs: { sendMessage } })
 
