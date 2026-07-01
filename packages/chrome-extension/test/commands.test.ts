@@ -138,7 +138,8 @@ describe('extension command router', () => {
       .mockRejectedValueOnce(new Error('Could not establish connection. Receiving end does not exist.'))
       .mockResolvedValueOnce({ ok: true, data: { page: { title: 'Docs', url: 'https://docs.example.com/page' }, refs: [], text: 'Page: Docs' } })
     const executeScript = vi.fn().mockResolvedValue([{}])
-    vi.stubGlobal('chrome', { tabs: { get, sendMessage, query: vi.fn().mockResolvedValue([authorizedTab()]) }, scripting: { executeScript } })
+    const getRegisteredContentScripts = vi.fn().mockResolvedValue([])
+    vi.stubGlobal('chrome', { tabs: { get, sendMessage, query: vi.fn().mockResolvedValue([authorizedTab()]) }, scripting: { executeScript, getRegisteredContentScripts } })
 
     await expect(routeBridgeMethod('snapshot', { tabId: 42, interactive: true })).resolves.toEqual({
       page: { title: 'Docs', url: 'https://docs.example.com/page' },

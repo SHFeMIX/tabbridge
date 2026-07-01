@@ -27,6 +27,32 @@ export async function waitMs(ms: number): Promise<{ waitedMs: number }> {
   return { waitedMs: ms }
 }
 
+async function deliverTabMessage(tabId: number, message: unknown): Promise<unknown> {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const missingReceiver = errorMessage.includes('Receiving end does not exist') || errorMessage.includes('Could not establish connection')
+    if (!missingReceiver) throw error
+
+    // WXT dev builds register content scripts at runtime. If one is registered, wait for it to
+    // inject rather than creating a duplicate that WXT's stopOldScripts will immediately invalidate.
+    const registered = await chrome.scripting.getRegisteredContentScripts?.()
+    const hasRuntimeContentScript = Array.isArray(registered) && registered.some((cs) => cs.js?.includes('content-scripts/content.js'))
+    if (hasRuntimeContentScript) {
+      await waitMs(500)
+      try {
+        return await chrome.tabs.sendMessage(tabId, message)
+      } catch {
+        // runtime script still hasn't loaded; fall through to manual injection
+      }
+    }
+
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/content.js'] })
+    return await chrome.tabs.sendMessage(tabId, message)
+  }
+}
+
 export async function waitForTextInDocument(doc: Document, text: string, timeoutMs: number): Promise<{ found: boolean; text: string }> {
   const started = Date.now()
   while (Date.now() - started <= timeoutMs) {
@@ -427,12 +453,7 @@ export async function routeBridgeMethod(method: string, _params: unknown): Promi
       if (!tab?.url || grantStatusForTab(getGrants(), { tabId, url: tab.url }, Date.now()) !== 'authorized') {
         throw tabNotAuthorizedError(tabId)
       }
-      try {
-        return await chrome.tabs.sendMessage(tabId, message)
-      } catch {
-        await chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/content.js'] })
-        return await chrome.tabs.sendMessage(tabId, message)
-      }
+      return deliverTabMessage(tabId, message)
     },
   }
 

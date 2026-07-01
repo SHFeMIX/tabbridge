@@ -66,6 +66,31 @@ function updateValue(element: Element, value: string): void {
   element.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
+function dispatchClickSequence(element: Element): void {
+  const html = element as HTMLElement
+  const rect = html.getBoundingClientRect()
+  const clientX = rect.left + rect.width / 2
+  const clientY = rect.top + rect.height / 2
+  const init = {
+    bubbles: true,
+    cancelable: true,
+    clientX,
+    clientY,
+    screenX: clientX,
+    screenY: clientY,
+  }
+  const supportsPointer = typeof PointerEvent !== 'undefined'
+  if (supportsPointer) {
+    html.dispatchEvent(new PointerEvent('pointerdown', { ...init, pointerType: 'mouse', isPrimary: true }))
+  }
+  html.dispatchEvent(new MouseEvent('mousedown', init))
+  if (supportsPointer) {
+    html.dispatchEvent(new PointerEvent('pointerup', { ...init, pointerType: 'mouse', isPrimary: true }))
+  }
+  html.dispatchEvent(new MouseEvent('mouseup', init))
+  html.click()
+}
+
 export async function executeRefAction(input: RefActionInput, store: RefStore, now: number): Promise<CliEnvelope<ActionResult>> {
   if (!store.hasLatestSnapshot(input.tabId, now)) return errorEnvelope(snapshotRequiredError())
 
@@ -79,7 +104,7 @@ export async function executeRefAction(input: RefActionInput, store: RefStore, n
   if (invalid) return invalid as CliEnvelope<ActionResult>
 
   if (input.command === 'click') {
-    ;(element as HTMLElement).click()
+    dispatchClickSequence(element)
   } else if (input.command === 'focus') {
     ;(element as HTMLElement).focus()
   } else if (input.command === 'clear') {
