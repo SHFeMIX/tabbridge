@@ -51,11 +51,20 @@ function decide(id: string, decision: 'approve' | 'deny'): void {
 <template>
   <main class="min-w-96 bg-slate-950 p-4 text-slate-100">
     <header class="flex items-center gap-3 border-b border-slate-800 pb-3">
-      <div
-        class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-sky-600 text-sm font-bold text-white"
+      <svg
+        class="h-8 w-8 rounded-lg bg-gradient-to-br from-sky-400 to-sky-600 p-1.5 text-white"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
       >
-        T
-      </div>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <path d="M8 12h8" />
+        <path d="M12 8v8" />
+      </svg>
       <div>
         <h1 class="text-base font-semibold leading-tight">{{ extensionName }}</h1>
         <p class="text-xs text-slate-400">{{ extensionTagline }}</p>
@@ -63,7 +72,7 @@ function decide(id: string, decision: 'approve' | 'deny'): void {
     </header>
 
     <section
-      class="mt-4 rounded-xl border border-emerald-800 bg-emerald-950/60 p-3"
+      class="mt-4 rounded-xl border border-emerald-800 bg-emerald-950 p-3"
       aria-label="连接信息"
     >
       <div class="flex items-center gap-2">
@@ -80,7 +89,7 @@ function decide(id: string, decision: 'approve' | 'deny'): void {
         <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-400">待处理审批</h2>
         <span
           class="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-300"
-          aria-live="polite"
+          :aria-label="`待处理审批 ${approvalState.pendingApprovals.value.length} 个`"
         >
           {{ approvalState.pendingApprovals.value.length }}
         </span>
@@ -131,7 +140,7 @@ function decide(id: string, decision: 'approve' | 'deny'): void {
           <div class="min-w-0 flex-1">
             <h3 class="text-sm font-medium text-sky-100">站点访问请求</h3>
             <p class="mt-1 text-sm text-sky-200">{{ approval.summary }}</p>
-            <p class="mt-2 text-xs text-sky-300/80">
+            <p class="mt-2 text-xs text-sky-300/80" aria-live="polite">
               剩余 {{ formatTimeRemaining(approval.expiresAt, now) }}
             </p>
           </div>
@@ -190,14 +199,14 @@ function decide(id: string, decision: 'approve' | 'deny'): void {
             <p class="mt-1 text-sm text-amber-200">{{ approval.summary }}</p>
             <p
               v-if="approval.payloadSummary"
-              class="mt-2 overflow-x-auto rounded-md bg-amber-950/70 p-2 font-mono text-xs text-amber-100"
+              class="mt-2 overflow-x-auto rounded-md bg-amber-950/50 p-2 font-mono text-xs text-amber-100"
             >
               {{ approval.payloadSummary }}
             </p>
             <ul v-if="approval.riskReasons?.length" class="mt-2 list-disc space-y-0.5 pl-5 text-xs text-amber-200">
               <li v-for="reason in approval.riskReasons" :key="reason">{{ reason }}</li>
             </ul>
-            <p class="mt-2 text-xs text-amber-300/80">
+            <p class="mt-2 text-xs text-amber-300/80" aria-live="polite">
               剩余 {{ formatTimeRemaining(approval.expiresAt, now) }}
             </p>
           </div>
