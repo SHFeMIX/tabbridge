@@ -14,6 +14,6 @@ describe('popup approval UI', () => {
 
     const wrapper = mount(App)
     expect(wrapper.text()).toContain('TabBridge')
-    expect(wrapper.text()).toContain('No pending approvals')
+    expect(wrapper.text()).toContain('没有待处理的审批')
   })
 })
