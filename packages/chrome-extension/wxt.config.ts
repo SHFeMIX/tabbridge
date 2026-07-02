@@ -3,6 +3,7 @@ import { defineConfig } from 'wxt'
 
 export default defineConfig({
   srcDir: 'src',
+  outDir: 'dist',
   manifest: {
     name: 'TabBridge',
     permissions: ['tabs', 'scripting', 'storage', 'activeTab', 'offscreen', 'alarms'],
