@@ -4,6 +4,6 @@ import { resolveLiveElement } from './actions'
 import type { ElementRefRecord } from '@tabbridge/shared'
 
 export function readRefHtml(record: ElementRefRecord, maxBytes: number): BoundedReadResult | undefined {
-  const element = resolveLiveElement(record)
-  return element ? sanitizeElementHtml(element, maxBytes) : undefined
+  const resolution = resolveLiveElement(record)
+  return resolution.element ? sanitizeElementHtml(resolution.element, maxBytes) : undefined
 }

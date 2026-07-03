@@ -40,10 +40,11 @@ function liveCandidates(): Element[] {
   return Array.from(document.querySelectorAll(INTERACTABLE_SELECTOR))
 }
 
-export function resolveLiveElement(record: ElementRefRecord): Element | undefined {
+export function resolveLiveElement(record: ElementRefRecord): { element?: Element; reason?: string; bestScore?: number } {
   const candidates = liveCandidates().map((element) => ({ element, fingerprint: fingerprintElement(element) }))
   const match = findBestLiveMatch(record, candidates)
-  return match.kind === 'matched' ? match.element : undefined
+  if (match.kind === 'matched') return { element: match.element, reason: match.reason, bestScore: match.score }
+  return { reason: match.reason, bestScore: match.score }
 }
 
 function visibleAndEnabled(element: Element): CliEnvelope<undefined> | undefined {
@@ -97,31 +98,37 @@ export async function executeRefAction(input: RefActionInput, store: RefStore, n
   const record = store.getLatestRecord(input.tabId, input.frameRef, input.ref, now)
   if (!record) return errorEnvelope(refStaleError(input.tabId, input.ref))
 
-  const element = resolveLiveElement(record)
-  if (!element) return errorEnvelope(refStaleError(input.tabId, input.ref))
+  const resolution = resolveLiveElement(record)
+  if (!resolution.element) {
+    const detail = resolution.reason ? ` (${resolution.reason}, bestScore=${resolution.bestScore ?? 0})` : ''
+    return errorEnvelope({
+      ...refStaleError(input.tabId, input.ref),
+      message: `Ref ${input.ref} is not available in the latest snapshot. Run tabbridge snapshot -i again.${detail}`,
+    })
+  }
 
-  const invalid = visibleAndEnabled(element)
+  const invalid = visibleAndEnabled(resolution.element)
   if (invalid) return invalid as CliEnvelope<ActionResult>
 
   if (input.command === 'click') {
-    dispatchClickSequence(element)
+    dispatchClickSequence(resolution.element)
   } else if (input.command === 'focus') {
-    ;(element as HTMLElement).focus()
+    ;(resolution.element as HTMLElement).focus()
   } else if (input.command === 'clear') {
-    updateValue(element, '')
+    updateValue(resolution.element, '')
   } else if (input.command === 'fill') {
-    updateValue(element, input.text ?? '')
+    updateValue(resolution.element, input.text ?? '')
   } else if (input.command === 'type') {
-    updateValue(element, `${(element as HTMLInputElement).value ?? ''}${input.text ?? ''}`)
+    updateValue(resolution.element, `${(resolution.element as HTMLInputElement).value ?? ''}${input.text ?? ''}`)
   } else if (input.command === 'select') {
-    ;(element as HTMLSelectElement).value = input.value ?? ''
-    element.dispatchEvent(new Event('change', { bubbles: true }))
+    ;(resolution.element as HTMLSelectElement).value = input.value ?? ''
+    resolution.element.dispatchEvent(new Event('change', { bubbles: true }))
   } else if (input.command === 'check') {
-    ;(element as HTMLInputElement).checked = true
-    element.dispatchEvent(new Event('change', { bubbles: true }))
+    ;(resolution.element as HTMLInputElement).checked = true
+    resolution.element.dispatchEvent(new Event('change', { bubbles: true }))
   } else if (input.command === 'uncheck') {
-    ;(element as HTMLInputElement).checked = false
-    element.dispatchEvent(new Event('change', { bubbles: true }))
+    ;(resolution.element as HTMLInputElement).checked = false
+    resolution.element.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
   return okEnvelope({ action: input.command, ref: input.ref })

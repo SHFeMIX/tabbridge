@@ -62,7 +62,12 @@ function scoreRecord(record: ElementRefRecord, next: ElementFingerprint): { scor
   const roleConflict = normalize(record.role) !== normalize(next.role)
   const nameSimilarity = wordSimilarity(record.accessibleName || record.name, next.accessibleName)
   const nameConflict = nameSimilarity < 0.25
-  if (record.identityHash === next.identityHash && !roleConflict && !nameConflict) return { score: 100, roleConflict: false, nameConflict: false }
+  if (record.identityHash === next.identityHash && !roleConflict && !nameConflict) {
+    // Exact identity match is very strong, but include bounding-box score so
+    // duplicated elements (e.g. header + footer nav) can still be disambiguated
+    // by their original position.
+    return { score: 100 + boxScore(record.boundingBox, next.boundingBox), roleConflict: false, nameConflict: false }
+  }
   let score = 0
   if (!roleConflict) score += 30
   if (normalize(record.accessibleName || record.name) === normalize(next.accessibleName)) score += 35
