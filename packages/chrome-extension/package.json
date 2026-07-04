@@ -9,7 +9,7 @@
     "test": "vitest --run",
     "typecheck": "vue-tsc --noEmit",
     "lint": "vue-tsc --noEmit",
-    "clean": "rm -rf .output .wxt dist"
+    "clean": "rm -rf .wxt dist"
   },
   "dependencies": {
     "@tabbridge/shared": "workspace:*",
@@ -19,6 +19,7 @@
     "@types/chrome": "^0.2.0",
     "@vitejs/plugin-vue": "catalog:",
     "@vue/test-utils": "catalog:",
+    "autoprefixer": "^10.5.2",
     "jsdom": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",

@@ -1,57 +1,77 @@
-# Task 3 Report: Broker WebSocket Server
+# Task 3 Report: Refactor Popup App.vue
 
-## Summary
+## What was implemented
 
-Implemented the Broker WebSocket server (`BrokerServer`) that accepts CLI and extension clients, authenticates them, and routes JSON-RPC requests/responses between them.
+- Updated `packages/chrome-extension/test/popup.test.ts` to assert the new empty-state Chinese copy: `没有待处理的审批`.
+- Replaced `packages/chrome-extension/src/entrypoints/popup/App.vue` with a new dashboard-style UI:
+  - Header with gradient icon, extension name `TabBridge`, and tagline `本地标签页桥接器`.
+  - Connection status card (`Extension UI is available`) with emerald styling.
+  - Pending approvals section with a live count badge and empty state (checkmark icon + `没有待处理的审批`).
+  - Site approval cards (sky theme) with icon, summary, remaining time, and Allow/Deny actions.
+  - High-risk approval cards (amber theme) with warning icon, `High` badge, payload summary, risk reasons, remaining time, and Allow once/Deny actions.
+  - Added `decidingIds` set to disable buttons and show `处理中…` while a decision is in flight.
+  - Added a `now` ref updated every second so `formatTimeRemaining` countdowns stay current.
 
-## Files Created
+## TDD evidence
 
-- `packages/broker/src/server.ts` — WebSocket server implementation
-- `packages/broker/test/server.test.ts` — Test verifying CLI request rejection when no extension is connected
+### RED (test updated before implementation)
 
-## Files Modified
+Command:
 
-- `packages/broker/src/index.ts` — Exported `BrokerServer`, `BrokerServerOptions`, `BrokerStatus`, `BrokerClient`
+```bash
+cd /Users/alan/Desktop/tabbridge/packages/chrome-extension
+pnpm test -- popup.test.ts
+```
 
-## Implementation Details
+Result:
 
-### `BrokerServer` class
+```text
+ ❯ test/popup.test.ts (1 test | 1 failed)
+   × popup approval UI > renders bridge status and empty approval state 14ms
+     → expected 'TabBridgeLocal bridge for authorized,…' to contain '没有待处理的审批'
 
-- **Constructor**: Creates a `WebSocketServer` on the given port (or ephemeral port 0). Exposes the actual bound port via `readonly port`.
-- **Authentication**:
-  - CLI clients authenticate by sending `{ type: 'auth', token: <token> }` matching the configured token.
-  - Extension clients authenticate by sending `{ role: 'extension' }` from an origin starting with `chrome-extension://`.
-  - Unauthenticated connections are closed after a 5-second timeout.
-- **Message Routing**:
-  - CLI JSON-RPC requests are validated and forwarded to the extension client.
-  - Extension responses are matched against pending CLI requests by `id` and forwarded back.
-  - Extension `broker.hello` messages are stored in `status().extensionHello`.
-  - When no extension is connected, CLI requests receive `EXTENSION_NOT_CONNECTED` error.
-- **Cleanup**: `close()` terminates all client sockets and shuts down the `WebSocketServer`.
+AssertionError: expected 'TabBridgeLocal bridge for authorized,…' to contain '没有待处理的审批'
+```
 
-### Types Exported
+### GREEN (test passes after App.vue refactor)
 
-- `BrokerClient` — socket + role + auth state
-- `BrokerServerOptions` — port and token
-- `BrokerStatus` — cliConnected, extensionConnected, extensionHello
+Command:
 
-## Test Results
+```bash
+cd /Users/alan/Desktop/tabbridge/packages/chrome-extension
+pnpm test -- popup.test.ts
+```
 
-- **Tests**: 9 passed (3 files)
-- **TypeScript**: `tsc --noEmit` passes with zero errors
+Result:
 
-## Build Note
+```text
+ ✓ test/popup.test.ts (1 test) 12ms
 
-The `@tabbridge/shared` package needed to be rebuilt (`pnpm --filter @tabbridge/shared build`) before tests could run, because `createJsonRpcError` was not yet present in the built `dist/` output consumed by the broker package.
+ Test Files  26 passed (26)
+      Tests  80 passed (80)
+```
 
-## TypeScript Strictness Notes
+## Files changed
 
-- Used `as const` for `STANDARD_ERRORS` instead of `Record<string, JsonRpcError>` to avoid `noUncheckedIndexedAccess` making lookups potentially `undefined`.
-- Used `() => resolve()` wrapper for `wss.close()` because its callback signature `(err?: Error) => void` is incompatible with `Promise` resolve.
+- `packages/chrome-extension/src/entrypoints/popup/App.vue` (full dashboard refactor)
+- `packages/chrome-extension/test/popup.test.ts` (empty-state assertion updated)
+
+## Self-review findings
+
+- The implementation matches the brief exactly, including markup, Tailwind classes, and behavior.
+- `formatTimeRemaining` and `useApprovalState` are imported from the expected relative paths.
+- Timer is correctly cleaned up in `onUnmounted`.
+- `decidingIds` is updated immutably (via `new Set`) to preserve Vue reactivity.
+- Type check (`pnpm typecheck`) passes with no errors.
+- Full test suite passes (80 tests across 26 files).
+
+## Issues or concerns
+
+None. The commit was authored using the default system git identity (`邵竞帆 <alan@192.168.5.6>`); this is an environment-local identity and does not affect code correctness.
 
 ## Commit
 
-- `914dd63` — feat(broker): add WebSocket server with auth and routing
+- `8536dae` feat(extension): redesign popup with dashboard UI and approval feedback
 
 ## Status
 
