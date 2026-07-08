@@ -1,11 +1,26 @@
 # TabBridge Error Recovery
 
-- `EXTENSION_NOT_CONNECTED`: Ask the user to open Chrome and click the TabBridge extension icon, or run any `tabbridge` command (e.g., `tabbridge status --json`) to start the broker. Then run `tabbridge status --json`.
-- `BRIDGE_SOCKET_UNAVAILABLE`: Ask the user to reopen the extension popup. Run `tabbridge doctor` if it persists.
+- `EXTENSION_NOT_CONNECTED`: Ask the user to open Chrome and click the TabBridge extension icon, then run `tabbridge status --json`. Running any `tabbridge` command will also try to start the broker automatically.
+- `BRIDGE_SOCKET_UNAVAILABLE`: Ask the user to reopen the extension popup. Run `tabbridge doctor --json` if it persists.
+- `BRIDGE_REQUEST_TIMEOUT`: Retry the command. If it persists, run `tabbridge doctor --json` and ask the user to reopen the extension popup.
+- `TAB_NOT_FOUND`: Ensure Chrome has a focused normal window with an active tab, or use `tabbridge connect --tab <tabId> --json` to set an explicit session tab.
 - `TAB_NOT_AUTHORIZED`: Run `tabbridge tabs request-access --tab <tabId> --reason <reason> --json`.
-- `USER_APPROVAL_REQUIRED`: Explain the access request and wait with the returned approval id.
-- `ACTION_REQUIRES_CONFIRMATION`: Explain the high-risk action and wait with the returned approval id.
-- `REF_STALE`: Take a new snapshot and use a ref from the new snapshot.
 - `TAB_NOT_ACTIVE_FOR_SCREENSHOT`: Ask the user to activate the target tab before retrying screenshot.
+- `HOST_PERMISSION_DENIED`: The extension lacks host permission for the origin. Ask the user to grant it in Chrome's extension settings.
+- `USER_APPROVAL_REQUIRED`: Explain the access request and wait with the returned approval id.
+- `APPROVAL_EXPIRED`: The approval timed out. Request access again if still needed.
+- `APPROVAL_TIMEOUT`: The wait timed out. Check the approval status or request access again.
 - `UNSUPPORTED_PAGE`: Explain that Chrome internal pages, extension pages, file URLs, and special pages are outside the MVP.
+- `FRAME_NOT_ACCESSIBLE` / `FRAME_ORIGIN_NOT_AUTHORIZED`: iframe content is not accessible in the current version. Use main-frame elements only.
+- `SNAPSHOT_REQUIRED`: Run `tabbridge snapshot -i` before using `@refs`.
+- `REF_STALE`: Take a new snapshot and use a ref from the new snapshot.
+- `ELEMENT_NOT_VISIBLE`: The element is hidden or off-screen. Try a new snapshot or scroll it into view.
+- `ELEMENT_DISABLED`: The element is disabled. No action is possible until the page enables it.
+- `ELEMENT_SCOPE_TOO_LARGE`: Retry `tabbridge html --ref <ref>` with a smaller `--max-bytes` value or a more specific ref.
+- `ACTION_REQUIRES_CONFIRMATION`: Explain the high-risk action and wait with the returned approval id.
+- `ACTION_NOT_SUPPORTED_IN_EXTENSION_MODE`: The command is not available in the current extension mode. This is generally a non-recoverable implementation gap.
+- `USER_DENIED`: The user denied the request. Do not retry without explicit user instruction.
 - `MESSAGE_TOO_LARGE`: Retry with a smaller `--max-bytes` value or a narrower `html --ref` scope.
+- `PROTOCOL_VERSION_MISMATCH`: Update the CLI and extension to matching versions.
+- `BROWSER_COMMAND_TIMEOUT`: The extension could not communicate with the tab. Confirm the tab is still open and authorized, then retry.
+- `EXTENSION_ID_MISMATCH`: Verify the correct TabBridge extension is installed and enabled.
