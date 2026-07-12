@@ -72,29 +72,26 @@ The first `tabbridge` command automatically starts the local broker; you do not 
 ### Prerequisites
 
 - Node.js (LTS recommended)
-- pnpm 10.0.0 (the root `package.json` `packageManager` field pins this exact version)
 - Chrome / Chromium 116+
-- macOS (the broker currently stores runtime files under `~/Library/Application Support/tabbridge`)
+- macOS, Windows, or Linux
 
-### 1. Build from source
-
-TabBridge is currently a private monorepo and is not published to npm.
+### 1. Install the CLI
 
 ```bash
-pnpm install
-pnpm build
+npm install -g tabbridge
 ```
 
-The `tabbridge` binary is built to `packages/cli/dist/main.js`. Invoke it directly as `packages/cli/dist/main.js <command>`, or create a symlink named `tabbridge` pointing to that file in a directory on your PATH.
+After installation, the `tabbridge` command is available globally.
 
 ### 2. Install the browser extension
 
-Go to `packages/chrome-extension`, build with WXT, and load it into Chrome:
+> The extension is not yet on the Chrome Web Store. Until it is published, you need to build and load it manually from source.
+
+Clone the repository, install workspace dependencies from the monorepo root, build the extension with WXT, and load it into Chrome:
 
 ```bash
-cd packages/chrome-extension
 pnpm install
-pnpm build
+pnpm --filter @tabbridge/chrome-extension build
 ```
 
 Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select `packages/chrome-extension/dist/chrome-mv3/` (the directory that contains `manifest.json`).
@@ -103,7 +100,7 @@ When you run `tabbridge tabs request-access`, approve the site in the extension 
 
 Note: the extension popup UI is currently in Chinese. Approval buttons are 允许 (Allow), 允许一次 (Allow once), and 拒绝 (Deny).
 
-For development, run `pnpm dev`; WXT outputs to `packages/chrome-extension/dist/chrome-mv3-dev/`.
+For development, run `pnpm --filter @tabbridge/chrome-extension dev`; WXT outputs to `packages/chrome-extension/dist/chrome-mv3-dev/`.
 
 ### 3. Connect and operate a page
 

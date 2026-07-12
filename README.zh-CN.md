@@ -72,36 +72,33 @@ TabBridge 不同：它接管你**真实浏览器中正在运行的标签页**，
 ### 前置条件
 
 - Node.js（建议使用 LTS）
-- pnpm 10.0.0（根目录 `package.json` 的 `packageManager` 字段固定为此版本）
 - Chrome / Chromium 116+
-- macOS（Broker 目前将运行时文件存放在 `~/Library/Application Support/tabbridge`）
+- macOS、Windows 或 Linux
 
-### 1. 从源码构建
-
-TabBridge 当前是私有 monorepo，未发布到 npm。
+### 1. 安装 CLI
 
 ```bash
-pnpm install
-pnpm build
+npm install -g tabbridge
 ```
 
-`tabbridge` 可执行文件构建到 `packages/cli/dist/main.js`。直接以 `packages/cli/dist/main.js <命令>` 调用，或将其软链接为 PATH 中某个目录下的 `tabbridge`。
+安装完成后，`tabbridge` 命令即可全局使用。
 
 ### 2. 安装浏览器插件
 
-进入 `packages/chrome-extension`，使用 WXT 构建并加载到 Chrome：
+> 扩展目前尚未上架 Chrome Web Store。在上架之前，你需要从源码构建并手动加载。
+
+克隆仓库，在 monorepo 根目录安装 workspace 依赖，使用 WXT 构建并加载到 Chrome：
 
 ```bash
-cd packages/chrome-extension
 pnpm install
-pnpm build
+pnpm --filter @tabbridge/chrome-extension build
 ```
 
 然后打开 `chrome://extensions`，开启**开发者模式**，点击**加载已解压的扩展**，选择 `packages/chrome-extension/dist/chrome-mv3/`（包含 `manifest.json` 的目录）。
 
 运行 `tabbridge tabs request-access` 后，在扩展弹窗中批准站点访问。也可以稍后在扩展详情页的站点访问中管理。
 
-开发时请运行 `pnpm dev`；WXT 会输出到 `packages/chrome-extension/dist/chrome-mv3-dev/`。
+开发时请运行 `pnpm --filter @tabbridge/chrome-extension dev`；WXT 会输出到 `packages/chrome-extension/dist/chrome-mv3-dev/`。
 
 ### 3. 连接并操作页面
 

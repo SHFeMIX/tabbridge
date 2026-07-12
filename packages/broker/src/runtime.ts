@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import envPaths from 'env-paths'
 import { BROKER_PORT } from '@tabbridge/shared'
 
 export { BROKER_PORT }
@@ -12,12 +13,16 @@ export type RuntimePaths = {
   lockPath: string
 }
 
-export function createRuntimePaths(home = process.env.HOME ?? ''): RuntimePaths {
-  const supportDir = path.join(home, 'Library', 'Application Support', 'tabbridge')
+function defaultSupportDir(): string {
+  return envPaths('tabbridge', { suffix: '' }).data
+}
+
+export function createRuntimePaths(supportDir?: string): RuntimePaths {
+  const dir = supportDir ?? defaultSupportDir()
   return {
-    supportDir,
-    tokenPath: path.join(supportDir, 'broker-token'),
-    lockPath: path.join(supportDir, 'broker.lock'),
+    supportDir: dir,
+    tokenPath: path.join(dir, 'broker-token'),
+    lockPath: path.join(dir, 'broker.lock'),
   }
 }
 

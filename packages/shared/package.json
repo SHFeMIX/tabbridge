@@ -16,7 +16,7 @@
     "test": "vitest --run",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "node scripts/clean.cjs"
   },
   "devDependencies": {
     "tsup": "catalog:",

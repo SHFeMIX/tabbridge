@@ -2,12 +2,12 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { access } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
-import { createRuntimePaths, generateToken, readToken, writeToken, type RuntimePaths } from '@tabbridge/broker'
+import { createRuntimePaths, readToken, type RuntimePaths } from '@tabbridge/broker'
 import { BROKER_PORT } from '@tabbridge/shared'
 
 export const DEFAULT_BROKER_URL = `ws://127.0.0.1:${BROKER_PORT}`
 
-type SpawnBroker = (command: string, args: string[], options: { detached: true; stdio: 'ignore' }) => Pick<ChildProcess, 'unref'>
+type SpawnBroker = (command: string, args: string[], options: { detached: true; stdio: 'ignore'; windowsHide: true }) => Pick<ChildProcess, 'unref' | 'on'>
 
 type EnsureBrokerOptions = {
   brokerEntryExists?: (path: string) => Promise<boolean>
@@ -17,7 +17,6 @@ type EnsureBrokerOptions = {
   spawn?: SpawnBroker
   waitIntervalMs?: number
   waitTimeoutMs?: number
-  writeToken?: (paths: RuntimePaths, token: string) => Promise<void>
 }
 
 export async function isBrokerListening(url: string): Promise<boolean> {
@@ -39,15 +38,6 @@ export async function isBrokerListening(url: string): Promise<boolean> {
   })
 }
 
-async function waitFor(condition: () => Promise<boolean>, options: { timeoutMs: number; intervalMs: number }): Promise<boolean> {
-  const start = Date.now()
-  while (Date.now() - start < options.timeoutMs) {
-    if (await condition()) return true
-    await new Promise((resolve) => setTimeout(resolve, options.intervalMs))
-  }
-  return false
-}
-
 async function defaultBrokerEntryExists(path: string): Promise<boolean> {
   try {
     await access(path)
@@ -58,16 +48,43 @@ async function defaultBrokerEntryExists(path: string): Promise<boolean> {
 }
 
 function brokerEntryPath(): string {
-  return fileURLToPath(new URL('../../broker/dist/main.js', import.meta.url))
+  return fileURLToPath(new URL('./broker.js', import.meta.url))
 }
 
 async function brokerStartArgs(brokerEntryExists: (path: string) => Promise<boolean>): Promise<string[]> {
   const entryPath = brokerEntryPath()
   if (!(await brokerEntryExists(entryPath))) {
-    throw new Error(`BROKER_ENTRY_MISSING: expected built broker entry at ${entryPath}; run pnpm --filter @tabbridge/broker build`)
+    throw new Error(`BROKER_ENTRY_MISSING: expected built broker entry at ${entryPath}; please reinstall the tabbridge package`)
   }
 
   return [entryPath]
+}
+
+function waitForBroker(child: Pick<ChildProcess, 'on'>, url: string, isListening: (url: string) => Promise<boolean>, options: { timeoutMs: number; intervalMs: number }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now()
+    const timer = setInterval(async () => {
+      try {
+        if (await isListening(url)) {
+          clearInterval(timer)
+          resolve()
+        } else if (Date.now() - start >= options.timeoutMs) {
+          clearInterval(timer)
+          reject(new Error('BROKER_START_FAILED: broker did not start in time'))
+        }
+      } catch {
+        if (Date.now() - start >= options.timeoutMs) {
+          clearInterval(timer)
+          reject(new Error('BROKER_START_FAILED: broker did not start in time'))
+        }
+      }
+    }, options.intervalMs)
+
+    child.on('error', (error: Error) => {
+      clearInterval(timer)
+      reject(new Error(`BROKER_START_FAILED: ${error.message}`))
+    })
+  })
 }
 
 export async function ensureBroker(options: EnsureBrokerOptions = {}): Promise<{ url: string; token: string }> {
@@ -75,7 +92,6 @@ export async function ensureBroker(options: EnsureBrokerOptions = {}): Promise<{
   const url = DEFAULT_BROKER_URL
   const listening = options.isListening ?? isBrokerListening
   const readBrokerToken = options.readToken ?? readToken
-  const writeBrokerToken = options.writeToken ?? writeToken
   if (await listening(url)) {
     const token = await readBrokerToken(paths)
     if (!token) {
@@ -87,18 +103,20 @@ export async function ensureBroker(options: EnsureBrokerOptions = {}): Promise<{
   const child = (options.spawn ?? spawn)(process.execPath, await brokerStartArgs(options.brokerEntryExists ?? defaultBrokerEntryExists), {
     detached: true,
     stdio: 'ignore',
+    windowsHide: true,
   })
   child.unref()
 
-  const ready = await waitFor(() => listening(url), { timeoutMs: options.waitTimeoutMs ?? 5000, intervalMs: options.waitIntervalMs ?? 100 })
-  if (!ready) {
-    throw new Error('BROKER_START_FAILED: broker did not start in time')
-  }
+  await waitForBroker(
+    child,
+    url,
+    listening,
+    { timeoutMs: options.waitTimeoutMs ?? 5000, intervalMs: options.waitIntervalMs ?? 100 },
+  )
 
-  let token = await readBrokerToken(paths)
+  const token = await readBrokerToken(paths)
   if (!token) {
-    token = generateToken()
-    await writeBrokerToken(paths, token)
+    throw new Error('BROKER_TOKEN_MISSING: broker started but the token file is missing; restart the broker')
   }
   return { url, token }
 }

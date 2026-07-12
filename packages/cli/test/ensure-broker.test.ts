@@ -3,13 +3,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 type Listener = (...args: unknown[]) => void
 
 const mocks = vi.hoisted(() => {
-  const spawnedChild = { unref: vi.fn() }
+  const eventListeners = new Map<string, Listener[]>()
+  const spawnedChild = {
+    unref: vi.fn(),
+    on: vi.fn((event: string, listener: Listener) => {
+      eventListeners.set(event, [...(eventListeners.get(event) ?? []), listener])
+      return spawnedChild
+    }),
+    _emit(event: string, ...args: unknown[]) {
+      for (const listener of eventListeners.get(event) ?? []) {
+        listener(...args)
+      }
+    },
+  }
   return {
     listeningResults: [] as boolean[],
     spawn: vi.fn(() => spawnedChild),
     spawnedChild,
     readToken: vi.fn(),
-    writeToken: vi.fn(),
   }
 })
 
@@ -28,9 +39,7 @@ vi.mock('@tabbridge/broker', () => ({
     tokenPath: '/tmp/tabbridge-test/broker-token',
     lockPath: '/tmp/tabbridge-test/broker.lock',
   }),
-  generateToken: () => 'generated-token',
   readToken: mocks.readToken,
-  writeToken: mocks.writeToken,
 }))
 
 vi.mock('ws', () => ({
@@ -63,20 +72,20 @@ vi.mock('ws', () => ({
 
 const { ensureBroker, isBrokerListening } = await import('../src/ensure-broker.js')
 
-describe('ensure-broker helpers', () => {
+describe.sequential('ensure-broker helpers', () => {
   beforeEach(() => {
     mocks.listeningResults = []
     mocks.spawn.mockClear()
     mocks.spawnedChild.unref.mockClear()
+    mocks.spawnedChild.on.mockClear()
     mocks.readToken.mockReset()
-    mocks.writeToken.mockReset()
   })
 
   it('returns false when nothing is listening on the port', async () => {
     expect(await isBrokerListening('ws://127.0.0.1:1')).toBe(false)
   })
 
-  it('starts the built broker entry instead of requiring a future CLI broker command', async () => {
+  it('starts the broker entry bundled inside the CLI package', async () => {
     mocks.listeningResults = [false, true]
     mocks.readToken.mockResolvedValue('existing-token')
 
@@ -89,8 +98,8 @@ describe('ensure-broker helpers', () => {
     expect(result.token).toBe('existing-token')
     expect(mocks.spawn).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringContaining('packages/broker/dist/main.js')],
-      { detached: true, stdio: 'ignore' },
+      [expect.stringMatching(/tabbridge.*broker\.js$/)],
+      { detached: true, stdio: 'ignore', windowsHide: true },
     )
     expect(mocks.spawn).not.toHaveBeenCalledWith(
       process.execPath,
@@ -117,5 +126,35 @@ describe('ensure-broker helpers', () => {
     mocks.readToken.mockResolvedValue(undefined)
 
     await expect(ensureBroker()).rejects.toThrow('BROKER_TOKEN_MISSING')
+  })
+
+  it('reports a clear error when the spawned broker fails to start', async () => {
+    mocks.listeningResults = [false]
+    mocks.readToken.mockResolvedValue(undefined)
+
+    const promise = ensureBroker({
+      brokerEntryExists: async () => true,
+      waitTimeoutMs: 50,
+      waitIntervalMs: 1,
+    })
+
+    // Give the mock WebSocket a chance to report not-listening so the wait loop begins.
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    mocks.spawnedChild._emit('error', new Error('ENOENT'))
+
+    await expect(promise).rejects.toThrow('BROKER_START_FAILED: ENOENT')
+  })
+
+  it('reports a clear error when the broker starts but the token file is missing', async () => {
+    mocks.listeningResults = [false, true]
+    mocks.readToken.mockResolvedValue(undefined)
+
+    await expect(
+      ensureBroker({
+        brokerEntryExists: async () => true,
+        waitTimeoutMs: 50,
+        waitIntervalMs: 1,
+      }),
+    ).rejects.toThrow('BROKER_TOKEN_MISSING')
   })
 })

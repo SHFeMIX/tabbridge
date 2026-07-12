@@ -87,7 +87,13 @@ export async function run(options: RunOptions = {}): Promise<number> {
 }
 
 if (process.env.VITEST !== 'true') {
-  run().then((code) => {
-    process.exitCode = code
-  })
+  run().then(
+    (code) => {
+      process.exitCode = code
+    },
+    (error) => {
+      console.error(error)
+      process.exitCode = 1
+    },
+  )
 }

@@ -47,7 +47,12 @@ export async function runDoctor(input: DoctorRunInput = {}): Promise<DoctorRepor
   const checks: DoctorCheck[] = [
     { name: 'broker is listening on port 9876', ok: listening },
     { name: 'broker token file exists', ok: tokenExists },
-    { name: 'broker token file mode is 0600', ok: tokenMode !== undefined && (tokenMode & 0o777) === 0o600 },
+    {
+      name: 'broker token file mode is 0600',
+      ok:
+        process.platform === 'win32' ||
+        (tokenMode !== undefined && (tokenMode & 0o777) === 0o600),
+    },
     { name: 'broker lock file exists', ok: lockExists },
   ]
 

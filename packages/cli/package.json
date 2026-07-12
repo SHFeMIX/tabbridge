@@ -1,25 +1,35 @@
 {
-  "name": "@tabbridge/cli",
+  "name": "tabbridge",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
+  "license": "MIT",
   "bin": {
     "tabbridge": "dist/main.js"
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "directory": "dist"
+  },
   "scripts": {
-    "build": "tsup src/main.ts --format esm --dts --clean && node -e 'const fs = require(\"node:fs\"); const path = \"dist/main.js\"; let text = fs.readFileSync(path, \"utf8\"); if (!text.startsWith(\"#!\")) fs.writeFileSync(path, \"#!/usr/bin/env node\\\\n\" + text); fs.chmodSync(path, 0o755);'",
-    "test": "vitest --run",
+    "build": "pnpm --filter @tabbridge/shared build && pnpm --filter @tabbridge/broker build && tsup && node scripts/post-build.cjs",
+    "test": "pnpm build && vitest --run",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "node scripts/clean.cjs",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@tabbridge/broker": "workspace:*",
-    "@tabbridge/shared": "workspace:*",
+    "env-paths": "^4.0.0",
+    "proper-lockfile": "^4.1.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@tabbridge/broker": "workspace:*",
+    "@tabbridge/shared": "workspace:*",
     "@types/node": "catalog:",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/ws": "^8.5.13",
     "tsup": "catalog:",
     "typescript": "catalog:",

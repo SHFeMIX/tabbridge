@@ -5,12 +5,19 @@ import os from 'node:os'
 import { createRuntimePaths, generateToken, ensureSupportDir, writeToken, readToken } from '../src/runtime.js'
 
 describe('broker runtime', () => {
-  it('uses macOS Application Support path', () => {
-    expect(createRuntimePaths('/Users/alice')).toEqual({
-      supportDir: '/Users/alice/Library/Application Support/tabbridge',
-      tokenPath: '/Users/alice/Library/Application Support/tabbridge/broker-token',
-      lockPath: '/Users/alice/Library/Application Support/tabbridge/broker.lock',
+  it('uses the provided support directory override', () => {
+    expect(createRuntimePaths('/tmp/tabbridge-test')).toEqual({
+      supportDir: '/tmp/tabbridge-test',
+      tokenPath: '/tmp/tabbridge-test/broker-token',
+      lockPath: '/tmp/tabbridge-test/broker.lock',
     })
+  })
+
+  it('falls back to envPaths data directory when no override is given', () => {
+    const paths = createRuntimePaths()
+    expect(paths.supportDir).toMatch(/tabbridge$/)
+    expect(paths.tokenPath).toBe(path.join(paths.supportDir, 'broker-token'))
+    expect(paths.lockPath).toBe(path.join(paths.supportDir, 'broker.lock'))
   })
 
   it('generates a 64-char hex token', () => {
