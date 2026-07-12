@@ -78,7 +78,7 @@ TabBridge 不同：它接管你**真实浏览器中正在运行的标签页**，
 ### 1. 安装 CLI
 
 ```bash
-npm install -g tabbridge
+npm install -g tabbridge-cli
 ```
 
 安装完成后，`tabbridge` 命令即可全局使用。

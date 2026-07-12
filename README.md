@@ -78,7 +78,7 @@ The first `tabbridge` command automatically starts the local broker; you do not 
 ### 1. Install the CLI
 
 ```bash
-npm install -g tabbridge
+npm install -g tabbridge-cli
 ```
 
 After installation, the `tabbridge` command is available globally.
