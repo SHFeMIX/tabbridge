@@ -7,6 +7,16 @@ description: Use when the user asks you to inspect, understand, or interact with
 
 TabBridge controls only user-authorized, already-open tabs in the user's local Chrome or Chromium browser. It does not launch a separate browser, create a new browser profile, open new tabs as the main workflow, extract cookies, read localStorage, run arbitrary JavaScript, intercept network traffic, or bypass user approvals.
 
+## Install
+
+If the `tabbridge` command is not available, install the CLI from npm:
+
+```bash
+npm install -g tabbridge-cli
+```
+
+The published npm package name is `tabbridge-cli`, but the global executable command remains `tabbridge`.
+
 ## Required Safety Rules
 
 1. Start with `tabbridge status --json`.
@@ -14,7 +24,7 @@ TabBridge controls only user-authorized, already-open tabs in the user's local C
 3. Discover tabs with `tabbridge tabs list --json` or `tabbridge tabs current --json`.
 4. Do not assume discovery grants page-content access.
 5. Before reading page content, request access with `tabbridge tabs request-access --tab <tabId> --reason <reason> --json`.
-6. If the CLI returns `USER_APPROVAL_REQUIRED`, tell the user what is being requested and wait with `tabbridge approvals wait --id <approvalId> --json`.
+6. If the CLI returns `USER_APPROVAL_REQUIRED`, tell the user what is being requested and wait with `tabbridge approvals wait --id <approvalId> --json`. The extension popup UI is currently in Chinese; approval buttons are 允许 (Allow), 允许一次 (Allow once), and 拒绝 (Deny).
 7. Prefer `tabbridge snapshot -i` for page understanding.
 8. Save the returned refs and use them for ref-based actions. Refs are volatile `@eN` values assigned fresh on every snapshot.
 9. After meaningful page actions, take a new snapshot before continuing.

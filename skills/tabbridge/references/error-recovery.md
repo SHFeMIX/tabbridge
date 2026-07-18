@@ -1,7 +1,7 @@
 # TabBridge Error Recovery
 
 - `EXTENSION_NOT_CONNECTED`: Ask the user to open Chrome and click the TabBridge extension icon, then run `tabbridge status --json`. Running any `tabbridge` command will also try to start the broker automatically.
-- `BRIDGE_SOCKET_UNAVAILABLE`: Ask the user to reopen the extension popup. Run `tabbridge doctor --json` if it persists.
+- `BRIDGE_SOCKET_UNAVAILABLE`: Run `tabbridge doctor --json` first. If the broker is not listening, verify the CLI is installed correctly (`npm install -g tabbridge-cli`) or reinstall if the error mentions a missing broker entry. If the broker is listening but the extension is not connected, ask the user to open Chrome and click the TabBridge extension icon, then retry.
 - `BRIDGE_REQUEST_TIMEOUT`: Retry the command. If it persists, run `tabbridge doctor --json` and ask the user to reopen the extension popup.
 - `TAB_NOT_FOUND`: Ensure Chrome has a focused normal window with an active tab, or use `tabbridge connect --tab <tabId> --json` to set an explicit session tab.
 - `TAB_NOT_AUTHORIZED`: Run `tabbridge tabs request-access --tab <tabId> --reason <reason> --json`.
