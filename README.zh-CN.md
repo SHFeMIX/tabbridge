@@ -100,7 +100,21 @@ pnpm --filter @tabbridge/chrome-extension build
 
 开发时请运行 `pnpm --filter @tabbridge/chrome-extension dev`；WXT 会输出到 `packages/chrome-extension/dist/chrome-mv3-dev/`。
 
-### 3. 连接并操作页面
+### 3. 为 AI Agent 安装 Skill（可选）
+
+TabBridge 提供了供 AI Agent 使用的 Skill。使用 [`skills`](https://www.npmjs.com/package/skills) CLI 安装后，Agent 就可以调用 `tabbridge` 命令：
+
+```bash
+# Claude Code
+npx skills add SHFeMIX/tabbridge --skill tabbridge -a claude-code
+
+# 其他支持的 Agent（Codex、Cursor、OpenCode 等）
+npx skills add SHFeMIX/tabbridge --skill tabbridge -a <agent-name>
+```
+
+该命令会从本仓库安装 Skill 到你的 Agent 的 skills 目录。
+
+### 4. 连接并操作页面
 
 请确保当前标签页是正常的 `http://` 或 `https://` 页面。当前版本不支持 Chrome 内部页面、扩展页面、文件 URL 和 `about:` 页面。
 

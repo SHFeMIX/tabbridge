@@ -102,7 +102,21 @@ Note: the extension popup UI is currently in Chinese. Approval buttons are ÂÖÅËÆ
 
 For development, run `pnpm --filter @tabbridge/chrome-extension dev`; WXT outputs to `packages/chrome-extension/dist/chrome-mv3-dev/`.
 
-### 3. Connect and operate a page
+### 3. Install the Skill for your AI agent (optional)
+
+TabBridge provides a skill for AI agents. Install it with the [`skills`](https://www.npmjs.com/package/skills) CLI so your agent can invoke `tabbridge` commands:
+
+```bash
+# Claude Code
+npx skills add SHFeMIX/tabbridge --skill tabbridge -a claude-code
+
+# Other supported agents (Codex, Cursor, OpenCode, ...)
+npx skills add SHFeMIX/tabbridge --skill tabbridge -a <agent-name>
+```
+
+This installs the skill from this repository into your agent's skills directory.
+
+### 4. Connect and operate a page
 
 Make sure the active tab is a normal `http://` or `https://` page. Internal Chrome pages, extension pages, file URLs, and `about:` pages are not supported in the current version.
 
